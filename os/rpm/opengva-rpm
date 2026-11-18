@@ -1,0 +1,43 @@
+#!/bin/sh
+#
+# Make an RPM of a tree laid out as / is:
+#
+#   opengva-rpm NAME LICENSE SUMMARY DIR
+#
+# into /rpms (RPMS= for elsewhere), at VERSION and RELEASE (0 and 1 unless
+# said). Every file in DIR is in it as it is there - its mode included -
+# with what is under /etc as configuration. It owns the empty directories,
+# and those whose names say opengva. What its programs need - libraries,
+# interpreters, the users of a sysusers.d - rpmbuild finds and it requires,
+# so that dnf installs those with it.
+
+set -eu
+[ $# -eq 4 ] || { echo "usage: opengva-rpm NAME LICENSE SUMMARY DIR" >&2; exit 2; }
+name=$1 license=$2 summary=$3 root=$(realpath "$4")
+[ -n "$(ls -A "$root")" ] || { echo "opengva-rpm: $root is empty" >&2; exit 1; }
+top=$(mktemp -d)
+trap 'rm -rf "$top"' EXIT
+
+cd "$root"
+{
+	find . -mindepth 1 -type d \( -empty -o -name '*opengva*' \) -printf '%%dir "/%P"\n'
+	find . \( -type f -o -type l \) -printf '"/%P"\n' | sed 's|^"/etc/|%config(noreplace) &|'
+} | sort -u > "$top/files"
+
+cat > "$top/package.spec" <<SPEC
+Name:      $name
+Version:   ${VERSION:-0}
+Release:   ${RELEASE:-1}
+Summary:   $summary
+License:   $license
+%global debug_package %{nil}
+%global _build_id_links none
+%description
+$summary.
+%install
+cp -a "$root/." %{buildroot}/
+%files -f $top/files
+SPEC
+
+rpmbuild --quiet -bb --define "_topdir $top" --define 'source_date_epoch_from_changelog 0' --define "_rpmdir ${RPMS:-/rpms}" \
+	--define '_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm' "$top/package.spec"

@@ -1,0 +1,3 @@
+# The port by which a virtual machine's host stands in for the vehicle
+# (a program on the host): the HMI's, to read the feed from.
+SUBSYSTEM=="virtio-ports", ATTR{name}=="org.opengva.feed", OWNER="hmi"

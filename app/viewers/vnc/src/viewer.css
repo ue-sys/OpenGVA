@@ -1,0 +1,43 @@
+/* The window is the server's screen and nothing else, on black; when there
+   is no screen to show, a line says so. White on black, in the face the HMI
+   is set in (Monospace; DejaVu Sans Mono is what the image
+   ships). */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: rgb(0, 0, 0);
+  color: rgb(255, 255, 255);
+  font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
+  /* The size of the HMI's own text where the window is as wide as the
+     screen, which a functional area's is: 18 pixels to a width of 1024. In
+     anything narrower, such as a tile, no smaller than can be read. */
+  font-size: max(14px, 100vw * 18 / 1024);
+  user-select: none;
+  cursor: default;
+}
+
+#picture,
+#status {
+  position: absolute;
+  inset: 0;
+}
+
+/* A touch on the picture is the server's: the page is not to scroll or zoom
+   for it. */
+#picture {
+  touch-action: none;
+}
+
+#status {
+  display: grid;
+  place-items: center;
+  padding: 0 2em;
+  text-align: center;
+}
+
+#status[hidden] {
+  display: none;
+}

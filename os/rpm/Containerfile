@@ -1,0 +1,8 @@
+# What turns a tree of files into an RPM (opengva-rpm), for the stages that
+# compile OpenGVA's parts and for the layers on the image: everything that
+# runs on a crew station comes from an RPM, which is what os/hardened's
+# fapolicyd trusts, and nothing else.
+ARG ROCKY
+FROM $ROCKY
+RUN dnf -y --setopt=install_weak_deps=False install rpm-build && dnf clean all
+COPY opengva-rpm /usr/bin/opengva-rpm

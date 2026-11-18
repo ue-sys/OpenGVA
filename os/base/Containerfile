@@ -1,0 +1,36 @@
+# What every OpenGVA image is built on: Rocky Linux as a bootable container
+# (bootc), its kernel and systemd, and the boot. An image is this and one of
+# the directories beside it (the Makefile).
+#
+# ROCKY is which Rocky (the Makefile): the minimal variant, with no network
+# manager, no SSH server, no updates fetched and applied by themselves. An
+# image or layer that wants one of those brings it.
+ARG ROCKY
+FROM $ROCKY
+
+# Cockpit, the web console, on port 9090: what an image is looked after by
+# over the network.
+RUN dnf -y install cockpit-ws cockpit-system cockpit-bridge && dnf clean all
+
+# The kernel's command line (kargs.d), the host's name, the markers sent
+# to the console (opengva-markers.service), and Cockpit as OpenGVA (its
+# branding, and the login page's title).
+COPY rootfs/ /
+
+# Nothing on an OpenGVA image runs to a timetable. The development console:
+# root logs in on the serial port with no password, and everything that
+# builds, measures and tests an image does so by that (os/hardened takes it
+# away).
+RUN systemctl disable fstrim.timer fwupd-refresh.timer \
+	&& systemctl enable opengva-markers.service cockpit.socket \
+	&& usermod -p '' root
+
+# Who logs in to Cockpit: maintainer, password maintainer. Not in wheel, so
+# Cockpit gives it limited access - it sees, it changes nothing - and in
+# systemd-journal, so that what it sees includes the logs.
+# ponytail: a password everyone knows, on every image; give each vehicle
+# its own (or keys) before one leaves the bench.
+# 1001: 1000 is the HMI's (os/hmi's sysusers.d).
+RUN useradd --uid 1001 --create-home --groups systemd-journal \
+		--comment 'Maintainer (Cockpit, read-only)' maintainer \
+	&& echo maintainer:maintainer | chpasswd

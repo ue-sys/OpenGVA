@@ -1,0 +1,379 @@
+Tell the application when a window wants typing
+
+An application that types into another client's window with a virtual
+keyboard of its own has had to be told by whoever is at the screen that
+typing is wanted. A program can say so itself: the text-input protocol is
+how it tells the display server that a field of text has the focus, and
+the input-method protocol is how the display server passes that on to
+whatever supplies the text. With -u Cage now offers the first to the
+other clients and the second to the application, and to nobody else: any
+other client that would be the input method is told there is no place
+for it.
+
+A program says nothing of its fields unless its window has the keyboard
+focus: a toolkit does not take a window without it to be one that is
+being typed into. So while the application is the input method, the
+window it has on show under its own has the keyboard focus for as long
+as it is on show, and not only while the application has a virtual
+keyboard. What that window is sent is what it was sent before, and no
+more: the keys of the application's virtual keyboard. What any other
+keyboard does is passed to no client while the focus is lent, as it was.
+Having the focus, the window is also the one that is offered the
+selection, as any window with the focus is.
+
+The application is told three things. Activate, when a field of text
+takes the focus in the window on show; with it, what the field is for,
+if the program says - a number, a password - so that the application can
+show the keyboard that suits. The same again, without the activate, each
+time the program says something more of that field: a toolkit does when
+the field is touched again, which is how a keyboard that has been put
+away is asked for a second time. And deactivate, when no field has the
+focus any more, or the window loses it.
+
+Nothing goes the other way. What a field holds is not passed to the
+application, which has no use for it; and what the application might
+commit as an input method - a string, a preedit - is not passed to the
+program. The application types as before, with the keys of its virtual
+keyboard, which are what a program that has no text input at all takes
+too. Its own text inputs are told nothing: it is the input method.
+
+This is what lets the OpenGVA HMI's on-screen keyboard come up by itself
+when the crew touches a field of a web page, and go away when the field
+is left.
+
+Upstream: not submitted
+
+diff -Naur a/cage.1.scd b/cage.1.scd
+--- a/cage.1.scd
++++ b/cage.1.scd
+@@ -64,6 +64,18 @@
+ 	virtual keyboard, or the window is hidden or closed, the application
+ 	has the keyboard again.
+ 
++	The application can also be told when a window wants typing. With
++	-u Cage offers the text-input protocol to the other clients and the
++	input-method protocol to the application, and to nobody else. While
++	the application is the input method, the window it has on show has
++	the keyboard focus for as long as it is on show - still with nothing
++	from any keyboard but the application's virtual one - and when that
++	window says that a field of text has the focus, and when it says
++	that none has, the application is told: activate, with what the
++	field is for, and deactivate. What the application types is its
++	virtual keyboard's keys; text it commits as an input method is not
++	passed on.
++
+ *-v*
+ 	Show the version number and exit.
+ 
+diff -Naur a/seat.c b/seat.c
+--- a/seat.c
++++ b/seat.c
+@@ -21,11 +21,13 @@
+ #include <wlr/types/wlr_cursor.h>
+ #include <wlr/types/wlr_data_device.h>
+ #include <wlr/types/wlr_idle_notify_v1.h>
++#include <wlr/types/wlr_input_method_v2.h>
+ #include <wlr/types/wlr_keyboard_group.h>
+ #include <wlr/types/wlr_primary_selection.h>
+ #include <wlr/types/wlr_relative_pointer_v1.h>
+ #include <wlr/types/wlr_scene.h>
+ #include <wlr/types/wlr_seat.h>
++#include <wlr/types/wlr_text_input_v3.h>
+ #include <wlr/types/wlr_touch.h>
+ #include <wlr/types/wlr_virtual_keyboard_v1.h>
+ #include <wlr/types/wlr_virtual_pointer_v1.h>
+@@ -812,11 +814,189 @@
+ 	drag_icon_update_position(drag_icon);
+ }
+ 
++/* Tell the application, as the input method, whether a field of text has
++ * the focus in the view that has the keyboard, and what the field is for:
++ * when one takes the focus, when none has it any more, and - asked - each
++ * time the view says something of the field it has, which is how a field
++ * that is touched again asks again. What the field holds is not passed on:
++ * the application has no use for it. */
++static void
++seat_tell_input_method(struct cg_seat *seat, bool asked)
++{
++	struct wlr_input_method_v2 *input_method = seat->input_method;
++	if (!input_method) {
++		return;
++	}
++
++	struct wlr_text_input_v3 *asking = NULL;
++	struct cg_text_input *text_input;
++	wl_list_for_each (text_input, &seat->text_inputs, link) {
++		if (text_input->text_input->focused_surface && text_input->text_input->current_enabled) {
++			asking = text_input->text_input;
++			break;
++		}
++	}
++
++	if (!asking) {
++		if (!input_method->active) {
++			return;
++		}
++		wlr_input_method_v2_send_deactivate(input_method);
++	} else {
++		if (!input_method->active) {
++			wlr_input_method_v2_send_activate(input_method);
++		} else if (!asked) {
++			return;
++		}
++		if (asking->active_features & WLR_TEXT_INPUT_V3_FEATURE_CONTENT_TYPE) {
++			wlr_input_method_v2_send_content_type(input_method, asking->current.content_type.hint,
++							      asking->current.content_type.purpose);
++		}
++	}
++	wlr_input_method_v2_send_done(input_method);
++}
++
++static void
++handle_text_input_enable(struct wl_listener *listener, void *data)
++{
++	struct cg_text_input *text_input = wl_container_of(listener, text_input, enable);
++	seat_tell_input_method(text_input->seat, true);
++}
++
++static void
++handle_text_input_commit(struct wl_listener *listener, void *data)
++{
++	struct cg_text_input *text_input = wl_container_of(listener, text_input, commit);
++	seat_tell_input_method(text_input->seat, true);
++}
++
++static void
++handle_text_input_disable(struct wl_listener *listener, void *data)
++{
++	struct cg_text_input *text_input = wl_container_of(listener, text_input, disable);
++	seat_tell_input_method(text_input->seat, false);
++}
++
++static void
++handle_text_input_destroy(struct wl_listener *listener, void *data)
++{
++	struct cg_text_input *text_input = wl_container_of(listener, text_input, destroy);
++	struct cg_seat *seat = text_input->seat;
++
++	wl_list_remove(&text_input->enable.link);
++	wl_list_remove(&text_input->commit.link);
++	wl_list_remove(&text_input->disable.link);
++	wl_list_remove(&text_input->destroy.link);
++	wl_list_remove(&text_input->link);
++	free(text_input);
++	seat_tell_input_method(seat, false);
++}
++
++/* A client has a text input: it is told when a surface of the client's has
++ * the keyboard focus, and says when a field of text there has the focus.
++ * The application's own is told nothing: it is the input method, and has no
++ * use for one. */
++static void
++handle_new_text_input(struct wl_listener *listener, void *data)
++{
++	struct cg_seat *seat = wl_container_of(listener, seat, new_text_input);
++	struct wlr_text_input_v3 *wlr_text_input = data;
++	struct wl_client *client = wl_resource_get_client(wlr_text_input->resource);
++	if (view_client_is_primary(seat->server, client)) {
++		return;
++	}
++
++	struct cg_text_input *text_input = calloc(1, sizeof(struct cg_text_input));
++	if (!text_input) {
++		wlr_log(WLR_ERROR, "Failed to allocate text input.");
++		return;
++	}
++	text_input->text_input = wlr_text_input;
++	text_input->seat = seat;
++	text_input->enable.notify = handle_text_input_enable;
++	wl_signal_add(&wlr_text_input->events.enable, &text_input->enable);
++	text_input->commit.notify = handle_text_input_commit;
++	wl_signal_add(&wlr_text_input->events.commit, &text_input->commit);
++	text_input->disable.notify = handle_text_input_disable;
++	wl_signal_add(&wlr_text_input->events.disable, &text_input->disable);
++	text_input->destroy.notify = handle_text_input_destroy;
++	wl_signal_add(&wlr_text_input->events.destroy, &text_input->destroy);
++	wl_list_insert(&seat->text_inputs, &text_input->link);
++
++	struct wlr_surface *focused = seat->seat->keyboard_state.focused_surface;
++	if (focused && wl_resource_get_client(focused->resource) == client) {
++		wlr_text_input_v3_send_enter(wlr_text_input, focused);
++	}
++}
++
++/* The keyboard focus has gone from one surface to another: the text inputs
++ * follow it. One whose field had the focus has it no longer. */
++static void
++handle_keyboard_focus_change(struct wl_listener *listener, void *data)
++{
++	struct cg_seat *seat = wl_container_of(listener, seat, keyboard_focus_change);
++	struct wlr_seat_keyboard_focus_change_event *event = data;
++
++	struct cg_text_input *text_input;
++	wl_list_for_each (text_input, &seat->text_inputs, link) {
++		struct wlr_text_input_v3 *wlr_text_input = text_input->text_input;
++		if (wlr_text_input->focused_surface == event->new_surface) {
++			continue;
++		}
++		if (wlr_text_input->focused_surface) {
++			wlr_text_input_v3_send_leave(wlr_text_input);
++		}
++		if (event->new_surface &&
++		    wl_resource_get_client(event->new_surface->resource) ==
++			    wl_resource_get_client(wlr_text_input->resource)) {
++			wlr_text_input_v3_send_enter(wlr_text_input, event->new_surface);
++		}
++	}
++	seat_tell_input_method(seat, false);
++}
++
++static void
++handle_input_method_destroy(struct wl_listener *listener, void *data)
++{
++	struct cg_seat *seat = wl_container_of(listener, seat, input_method_destroy);
++
++	wl_list_remove(&seat->input_method_destroy.link);
++	seat->input_method = NULL;
++	seat_lend_keyboard(seat);
++}
++
++/* A client would be the input method. The application is the only one that
++ * may, and there is one at the most: any other is told there is no place
++ * for it. From now the view the application has on show has the keyboard
++ * focus for as long as it is on show, which is what lets it have a field of
++ * text with the focus at all. */
++static void
++handle_new_input_method(struct wl_listener *listener, void *data)
++{
++	struct cg_seat *seat = wl_container_of(listener, seat, new_input_method);
++	struct wlr_input_method_v2 *input_method = data;
++
++	if (seat->input_method ||
++	    !view_client_is_primary(seat->server, wl_resource_get_client(input_method->resource))) {
++		wlr_input_method_v2_send_unavailable(input_method);
++		return;
++	}
++
++	seat->input_method = input_method;
++	seat->input_method_destroy.notify = handle_input_method_destroy;
++	wl_signal_add(&input_method->events.destroy, &seat->input_method_destroy);
++	seat_lend_keyboard(seat);
++	seat_tell_input_method(seat, false);
++}
++
+ static void
+ handle_destroy(struct wl_listener *listener, void *data)
+ {
+ 	struct cg_seat *seat = wl_container_of(listener, seat, destroy);
+ 	wl_list_remove(&seat->destroy.link);
++	wl_list_remove(&seat->new_text_input.link);
++	wl_list_remove(&seat->new_input_method.link);
++	wl_list_remove(&seat->keyboard_focus_change.link);
+ 	wl_list_remove(&seat->cursor_motion_relative.link);
+ 	wl_list_remove(&seat->cursor_motion_absolute.link);
+ 	wl_list_remove(&seat->cursor_button.link);
+@@ -923,6 +1103,30 @@
+ 	wl_list_init(&seat->pointers);
+ 	wl_list_init(&seat->touch);
+ 
++	/* With other clients' views under the application's, those clients
++	   can say where they want typing, and the application can be the
++	   input method that is told so. */
++	wl_list_init(&seat->text_inputs);
++	wl_list_init(&seat->new_text_input.link);
++	wl_list_init(&seat->new_input_method.link);
++	wl_list_init(&seat->keyboard_focus_change.link);
++	if (server->others_under) {
++		struct wlr_text_input_manager_v3 *text_input = wlr_text_input_manager_v3_create(server->wl_display);
++		struct wlr_input_method_manager_v2 *input_method =
++			wlr_input_method_manager_v2_create(server->wl_display);
++		if (text_input && input_method) {
++			seat->new_text_input.notify = handle_new_text_input;
++			wl_signal_add(&text_input->events.text_input, &seat->new_text_input);
++			seat->new_input_method.notify = handle_new_input_method;
++			wl_signal_add(&input_method->events.input_method, &seat->new_input_method);
++			seat->keyboard_focus_change.notify = handle_keyboard_focus_change;
++			wl_signal_add(&seat->seat->keyboard_state.events.focus_change,
++				      &seat->keyboard_focus_change);
++		} else {
++			wlr_log(WLR_ERROR, "Unable to create the text input and input method managers");
++		}
++	}
++
+ 	seat->new_input.notify = handle_new_input;
+ 	wl_signal_add(&backend->events.new_input, &seat->new_input);
+ 
+@@ -1028,22 +1232,21 @@
+ }
+ 
+ /* Give the keyboard focus to whom it belongs. While the application has a
+- * virtual keyboard of its own, that is the view under the application's
+- * that it has on show, if there is one and no more: several are shown side
+- * by side, and then there is no saying which of them a key is for. Otherwise
+- * it is the application's. The view is told of no key that is down: a key
+- * held on another keyboard is none of its business. */
++ * virtual keyboard of its own, or is the input method, that is the view
++ * under the application's that it has on show, if there is one and no more:
++ * several are shown side by side, and then there is no saying which of them
++ * a key is for. Otherwise it is the application's. The view is told of no
++ * key that is down: a key held on another keyboard is none of its
++ * business. */
+ void
+ seat_lend_keyboard(struct cg_seat *seat)
+ {
+-	struct cg_view *to = NULL;
++	bool lends = seat->input_method != NULL;
+ 	struct cg_keyboard_group *group;
+ 	wl_list_for_each (group, &seat->keyboard_groups, link) {
+-		if (group->lends) {
+-			to = view_get_only_shown(seat->server);
+-			break;
+-		}
++		lends = lends || group->lends;
+ 	}
++	struct cg_view *to = lends ? view_get_only_shown(seat->server) : NULL;
+ 	if (to == seat->lent_to) {
+ 		return;
+ 	}
+diff -Naur a/seat.h b/seat.h
+--- a/seat.h
++++ b/seat.h
+@@ -23,9 +23,19 @@
+ 	struct wl_list keyboard_groups;
+ 
+ 	/* The view under the application's that has been lent the keyboard,
+-	 * while the application has a virtual keyboard to type into it with:
+-	 * see seat_lend_keyboard(). */
++	 * while the application has a virtual keyboard to type into it with
++	 * or is the input method: see seat_lend_keyboard(). */
+ 	struct cg_view *lent_to;
++
++	/* The application as the input method, if it is one, and every
++	 * client's text inputs: where each says a field of text has the
++	 * focus. See seat_tell_input_method(). */
++	struct wlr_input_method_v2 *input_method;
++	struct wl_listener new_input_method;
++	struct wl_listener input_method_destroy;
++	struct wl_list text_inputs;
++	struct wl_listener new_text_input;
++	struct wl_listener keyboard_focus_change;
+ 	struct wl_list pointers;
+ 	struct wl_list touch;
+ 	struct wl_listener new_input;
+@@ -70,6 +80,16 @@
+ 	struct wl_listener lending_destroy;
+ };
+ 
++struct cg_text_input {
++	struct wlr_text_input_v3 *text_input;
++	struct cg_seat *seat;
++	struct wl_listener enable;
++	struct wl_listener commit;
++	struct wl_listener disable;
++	struct wl_listener destroy;
++	struct wl_list link; // cg_seat::text_inputs
++};
++
+ struct cg_pointer {
+ 	struct wl_list link; // seat::pointers
+ 	struct cg_seat *seat;

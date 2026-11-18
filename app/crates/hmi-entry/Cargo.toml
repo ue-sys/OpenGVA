@@ -1,0 +1,13 @@
+[package]
+name = "hmi-entry"
+description = "Data entry for the OpenGVA HMI: forms, and the on-screen keyboard they are filled in with. No windowing, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

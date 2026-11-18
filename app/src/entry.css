@@ -1,0 +1,243 @@
+/* A form's page and the on-screen keyboard, at the display's reference
+   size. The colours are hmi.css's; selectors here are a class longer
+   than its, so that they hold whichever of the two is read first. */
+
+/* The page keeps clear of where an alarm's text message goes and where a
+   threat's does, as the HMI's other pages do. The form is at the top and the
+   keyboard, when it is up, has what is under it - which is more when F19
+   has hidden the labels. */
+.page.form-page {
+  display: flex;
+  flex-direction: column;
+  padding: 44px 8px 40px;
+}
+
+/* The form leaves the page's top left corner to the Plan Position
+   Indicator, as an area's own page does. */
+.form-page .form {
+  flex: none;
+  margin: 0 6px 0 182px;
+}
+.form-page header {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+.form-page .form h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 4px 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Where the data stands, in words. That it has been saved is
+   good news, and has the colour of it. */
+.form-page .standing.saved {
+  color: var(--green);
+}
+.form-page .where {
+  color: rgb(190, 190, 190);
+}
+
+/* A field: its title and, beside it, its box. The whole row
+   is what a touch on the field can land on, and is 15 mm high on a 12.1
+   inch display. Two of them are shown while the keyboard is up
+   (FIELDS_BESIDE_KEYBOARD in hmi-entry), which has the rest of the page; a
+   form's eight (MOST_FIELDS) fill the page without it. */
+.form-page .field {
+  display: grid;
+  grid-template-columns: 172px 1fr;
+  align-items: center;
+  height: 62px;
+  margin-bottom: 2px;
+  padding: 0 8px;
+  border: 3px solid transparent;
+  touch-action: none;
+}
+.form-page .field .title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding-right: 12px;
+  line-height: 22px;
+  color: rgb(190, 190, 190);
+}
+/* The cursor: the field it is on is marked as a selected soft
+   key is. */
+.form-page .field.cursor {
+  background: var(--key-green);
+  border-color: var(--yellow);
+  outline: 1px solid var(--black);
+}
+.form-page .field.cursor .title {
+  color: var(--white);
+}
+/* The box: black on white, and as long as what it can hold -
+   a character of a monospace face is as wide as any other
+   (LONGEST in hmi-entry is what fits beside a title). Text is put at its
+   left and a number, whole or not, at its right. */
+.form-page .field .value {
+  justify-self: start;
+  width: calc(var(--length) * 1ch + 28px);
+  height: 40px;
+  padding: 0 10px 0 12px;
+  background: var(--white);
+  color: var(--black);
+  font-size: 20px;
+  line-height: 40px;
+  white-space: pre;
+  overflow: hidden;
+}
+.form-page .field.number .value,
+.form-page .field.decimal .value {
+  text-align: right;
+}
+/* Where the next character goes, in the field being entered into. It has
+   its room whether it is shown or not, so that a number does not move when
+   it comes and goes. */
+.form-page .caret {
+  display: inline-block;
+  width: 2px;
+  height: 24px;
+  margin-left: 2px;
+  vertical-align: -5px;
+  background: var(--black);
+  visibility: hidden;
+}
+.form-page .caret.shown {
+  visibility: visible;
+}
+
+/* The on-screen keyboard: keys on the grid the frame gives. On a form's
+   page it has what the fields leave. On a 12.1 inch display a QWERTY key is
+   then 17 mm wide and 18 mm high, with 1.5 mm between it and the next
+  ; higher, when F19 has hidden the labels and the page is
+   longer. */
+.keyboard {
+  display: grid;
+  grid-template-columns: repeat(var(--columns), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
+  gap: 6px;
+}
+.form-page .keyboard {
+  flex: 1;
+  min-height: 0;
+  margin-top: 12px;
+}
+/* Over another program's page it is in a band across the bottom, as wide
+   as the screen, and the program's picture has what is above. The keys are
+   as wide as on a form and lower - 17 mm by 15 mm - which leaves the picture
+   two fifths of the page; they are between the columns of labels, each of
+   which is beside its button still, and clear of where a threat's text
+   message goes. The band and, while it is there, the columns of labels are
+   painted: what the display server is told is solid (App.tsx) is to be. */
+.screen .keyboard-band {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  align-self: end;
+  position: relative;
+  z-index: 1;
+  padding: 8px 132px 40px;
+  background: var(--black);
+}
+.keyboard-band .keyboard {
+  height: 339px;
+}
+/* The pad, for a field of a program's that takes a number, is as wide as
+   it is on a form and has the band's height: its keys are larger still. */
+.keyboard-band .keyboard.phone {
+  width: 396px;
+  margin: 0 auto;
+}
+.screen.typing .labels.left,
+.screen.typing .labels.right {
+  background: var(--black);
+}
+/* The phone pad has the height and not the width: its keys are as large as
+   are still keys. */
+.form-page .keyboard.phone {
+  align-self: center;
+  width: 396px;
+}
+/* A key is a soft key: white on green; on grey if it
+   would do nothing; with a selected label's yellow border and black outline
+   while the highlight is on it. */
+.keyboard .key {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  background: var(--key-green);
+  color: var(--white);
+  border: 3px solid var(--key-green);
+  font-size: 26px;
+  touch-action: none;
+}
+.keyboard .key.space,
+.keyboard .key.caps,
+.keyboard .key.symbols {
+  font-size: 20px;
+}
+.keyboard .key.unavailable {
+  background: var(--grey);
+  border-color: var(--grey);
+}
+/* A key that stays on says so with a bar of the colour that means on. The
+   letters say it too: they are capitals. */
+.keyboard .key.on {
+  box-shadow: inset 0 6px 0 var(--green);
+}
+/* The visual response to a key's being selected: it is lit for
+   as long as that lasts. It is the frame that says so, whether it was a
+   finger or Enter, and not the browser's own idea of what is pressed: a key
+   touched while the touch screen is off has not been selected. */
+.keyboard .key.pressed {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--black);
+  box-shadow: none;
+}
+.keyboard .key.highlighted {
+  border-color: var(--yellow);
+  outline: 1px solid var(--black);
+}
+/* The question asked before what has been changed is discarded
+  : a dialog, as an alarm shown at length is one, where the
+   keyboard was. */
+.form-page .discard {
+  flex: none;
+  align-self: center;
+  width: 600px;
+  margin-top: 72px;
+  padding: 18px 22px 20px;
+  background: var(--black);
+  border: 2px solid var(--white);
+}
+.form-page .discard h2 {
+  margin: 0 0 14px;
+  font-size: 22px;
+  font-weight: bold;
+}
+.form-page .discard dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 20px;
+  margin: 0;
+}
+.form-page .discard dt {
+  color: rgb(190, 190, 190);
+}
+.form-page .discard dd {
+  margin: 0;
+}
+.keyboard .backspace-mark {
+  width: 44px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}

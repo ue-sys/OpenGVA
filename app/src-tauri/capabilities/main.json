@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "The HMI window may listen for frames. Nothing else of Tauri's is open to it.",
+  "windows": ["main"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

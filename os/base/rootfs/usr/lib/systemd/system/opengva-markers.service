@@ -1,0 +1,17 @@
+# What the services print that starts "OPENGVA " is a marker ("uptime" is
+# seconds since the kernel started): it goes to the console as well as the
+# journal, and nothing else does - the console is slow enough that the rest
+# is kept off it. whatever boots the image can read the markers from the serial console.
+#
+# The journal hands a marker on up to a quarter of a second after it was
+# printed. So each is sent with "sent=", the uptime when it went to the
+# console: what a host sets a virtual machine's clock against its own by.
+
+[Unit]
+Description=OpenGVA markers to the console
+
+[Service]
+ExecStart=/bin/sh -c 'journalctl -b -f --no-tail -o cat | awk '\''match($0, /OPENGVA [a-z]/) { getline up < "/proc/uptime"; close("/proc/uptime"); split(up, t, " "); print substr($0, RSTART) " sent=" t[1]; fflush() }'\'' > /dev/console'
+
+[Install]
+WantedBy=multi-user.target

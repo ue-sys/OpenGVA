@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# The verifier: greetd, as root. What opengva-verifier.service runs, where
+# something on the image needs a role (the service says how it knows).
+#
+# greetd is not started until the HMI has painted its first frame: what it
+# costs to start is not to delay that, and until then there is nobody to ask
+# it anything. It takes this script's place: what its service is asked to
+# stop, is it.
+
+RUNTIME_DIR=/run/user/$(id -u hmi)
+
+# The HMI makes this file when its first frame is on the screen, and the
+# display's script takes it away before each start of the display.
+until [ -e "$RUNTIME_DIR/opengva-hmi.ready" ]; do
+	sleep 0.1
+done
+
+# Where PAM keeps count of wrong PINs (faillock.conf): on the disk, so that
+# switching the crew station off and on again is not a way to start afresh.
+mkdir -p /var/lib/opengva/faillock
+
+# Where the last greetd was listening, nobody is.
+rm -f "$RUNTIME_DIR/opengva-verifier"
+
+exec /usr/bin/greetd --config /etc/opengva/greetd.toml

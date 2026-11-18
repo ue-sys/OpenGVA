@@ -1,0 +1,18 @@
+# The kernel's command line, on every OpenGVA image.
+#
+# "quiet" keeps the kernel's and systemd's messages off the consoles: a serial
+# console prints slowly enough to cost boot time. The markers still go there
+# (opengva-markers.service).
+# "i8042.noaux": no mouse is looked for on the keyboard controller's other
+# port. Looking takes a tenth of a second of every boot, and a crew station
+# has a touch screen. A USB mouse is found as ever.
+# "net.ifnames=0": the first network card is eth0, whichever slot it is in.
+# One to a line: os/hardened takes the serial console's away.
+kargs = [
+  "console=tty0",
+  "console=ttyS0,115200",
+  "quiet",
+  "vt.global_cursor_default=0",
+  "i8042.noaux",
+  "net.ifnames=0",
+]

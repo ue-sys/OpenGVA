@@ -1,0 +1,32 @@
+/* Cockpit, as OpenGVA. Cockpit looks for its branding by the ID in
+ * os-release, which is "rocky": this is used in place of Rocky's, which
+ * Cockpit does not have, and of its default. The pictures are made from
+ * assets/logo (assets/logo/README.md). */
+
+:root {
+    --ct-color-host-accent: #e32d26 !important;
+}
+
+#badge {
+    inline-size: 225px;
+    block-size: 80px;
+    background-image: url("logo.png");
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+/* Light letters where Cockpit is dark. */
+.pf-v6-theme-dark #badge {
+    background-image: url("logo-dark.png");
+}
+
+@media (prefers-color-scheme: dark) {
+    #badge {
+        background-image: url("logo-dark.png");
+    }
+}
+
+#brand::before {
+    content: "OpenGVA";
+}

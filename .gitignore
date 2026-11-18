@@ -1,0 +1,8 @@
+# Everything built or downloaded
+/build/
+node_modules/
+/app/dist/
+/app/target/
+/app/src-tauri/gen/
+
+__pycache__/

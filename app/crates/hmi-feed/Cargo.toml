@@ -1,0 +1,10 @@
+[package]
+name = "hmi-feed"
+description = "The line the HMI's feed comes down: a socket, or a port, with whatever knows the vehicle at the other end."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+libc = "0.2"

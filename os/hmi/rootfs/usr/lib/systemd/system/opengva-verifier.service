@@ -1,0 +1,28 @@
+# The verifier: what the HMI asks whether a PIN is an account's, when the
+# crew go to something that needs a role. It is greetd, which runs as root
+# and puts the question to PAM; the HMI can check nothing itself.
+#
+# Where nothing on the image needs a role, nobody is ever asked for a PIN,
+# and nothing is run as root to check one: what needs a role says so where
+# the HMI reads it, access.conf or a 'require' in an area's file.
+#
+# It is bound to the display, as the programs whose windows the HMI shows
+# are, and waits itself for the HMI's first frame (verifier): nothing that
+# needs a PIN is on the screen before that. Until it is up, and whenever it
+# is not, a PIN cannot be checked and nothing that needs one is given;
+# everything else is as it is without it.
+
+[Unit]
+Description=OpenGVA verifier: whether a PIN is an account's
+BindsTo=opengva-hmi.service
+After=opengva-hmi.service
+
+[Service]
+ExecCondition=/bin/sh -c '[ -e /etc/opengva/access.conf ] || grep -qs "^[[:space:]]*require[[:space:]]" /etc/opengva/gva-fa.d/*.conf'
+ExecStart=/usr/libexec/opengva/verifier
+Restart=always
+RestartSec=1
+TimeoutStopSec=5
+
+[Install]
+WantedBy=opengva-hmi.service

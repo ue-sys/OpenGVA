@@ -1,0 +1,10 @@
+[package]
+name = "bezel-input"
+description = "Bezel buttons from Linux input devices."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+hmi-core = { path = "../hmi-core" }

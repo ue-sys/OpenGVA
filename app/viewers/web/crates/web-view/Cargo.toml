@@ -1,0 +1,12 @@
+[package]
+name = "web-view"
+description = "A view of a web page: what its configuration says, where it may go, and how long it waits to try again. No windowing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# What an address is, by the rules a browser reads one by: which server it
+# names is not to be worked out by hand.
+url = "2"

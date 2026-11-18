@@ -1,0 +1,47 @@
+[package]
+name = "opengva-hmi"
+description = "OpenGVA HMI: the window, and the answers the UI asks for."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+base64 = "0.22"
+bezel-input = { path = "../crates/bezel-input" }
+# The window Tauri opens is a GTK one; its input region is set through GTK.
+gtk = "0.18"
+# What the verifier is told and says (src/verifier.rs): the rest of access
+# is the core's.
+hmi-access = { path = "../crates/hmi-access" }
+hmi-core = { path = "../crates/hmi-core" }
+hmi-feed = { path = "../crates/hmi-feed" }
+# Who is in a Unix group, and the system's log: the C library's to say.
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+# What greetd says, which is JSON (src/verifier.rs).
+serde_json = "1"
+# Tauri's defaults add X11 and the desktop bus. The image has neither: it is
+# Wayland only, so GTK is built without its X11 backend.
+tauri = { version = "2", default-features = false, features = ["wry", "compression"] }
+# A second connection to the display server, for what GTK has no word for:
+# other programs' windows (src/windows.rs). Pure Rust; no libwayland needed.
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# And, on that connection, a keyboard of the HMI's own: what the on-screen
+# keyboard types into another program's page is sent as its keys
+# (src/windows.rs). The protocol's Rust side comes from the same project as
+# the one above, and us-keyboard says which key types what.
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+# What a field of text is for, as a program says it, is in the words of the
+# text-input protocol, which this has: the crates above are built on it.
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+us-keyboard = { path = "../crates/us-keyboard" }
+
+[features]
+# Serve the bundled UI instead of a development server. Every build that is
+# not "tauri dev" sets this; without it the binary looks for a dev server.
+custom-protocol = ["tauri/custom-protocol"]

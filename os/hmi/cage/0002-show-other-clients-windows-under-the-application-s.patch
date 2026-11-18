@@ -1,0 +1,576 @@
+Show other clients' windows under the application's
+
+Cage shows one application. With -u it goes on showing that application
+in front, and with the keyboard, when other clients connect: their
+windows are put behind it instead of over it. Where the application's
+window is transparent they are seen, and where it also leaves a point out
+of its input region they get the pointer and touches there.
+
+A window shown this way is given, in place of the whole screen, the part
+of it that the application's window does not cover - by the application's
+own account, which is its opaque region. An application that draws bars
+along the top and bottom of the screen and says that those are opaque has
+the other windows fitted between them.
+
+One such window is shown at a time, and none to begin with. Which, is for
+the application to say, with the wlr-foreign-toplevel-management protocol
+that Cage now offers: every window is announced with its title and
+application id, the activate request shows a window in place of any other,
+and the minimize request hides it. A hidden window is not drawn.
+
+This is what lets the OpenGVA HMI be the one screen the crew sees, with
+another program's picture - a sight's video, a map - in the middle of it.
+
+Without -u nothing changes but that the protocol is offered, and that its
+activate request brings a window to the front.
+
+Upstream: not submitted
+
+diff -Naur a/cage.1.scd b/cage.1.scd
+--- a/cage.1.scd
++++ b/cage.1.scd
+@@ -33,6 +33,19 @@
+ *-s*
+ 	Allow VT switching
+ 
++*-u*
++	Show other clients' windows under the application's. The application
++	Cage was started for stays in front and keeps the keyboard. A window
++	of any other client is put behind it, where it is seen and gets the
++	pointer and touches wherever the application's window is transparent
++	and leaves them out of its input region. Such a window is given the
++	part of the screen that the application's window does not cover, by
++	its opaque region, rather than the whole of it. One of them is shown
++	at a time, and none to begin with: which, is for the application to
++	say with the wlr-foreign-toplevel-management protocol, whose activate
++	request shows a window in place of any other, and whose minimize
++	request hides it.
++
+ *-v*
+ 	Show the version number and exit.
+ 
+diff -Naur a/cage.c b/cage.c
+--- a/cage.c
++++ b/cage.c
+@@ -24,6 +24,7 @@
+ #include <wlr/types/wlr_compositor.h>
+ #include <wlr/types/wlr_data_device.h>
+ #include <wlr/types/wlr_export_dmabuf_v1.h>
++#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+ #include <wlr/types/wlr_gamma_control_v1.h>
+ #include <wlr/types/wlr_idle_inhibit_v1.h>
+ #include <wlr/types/wlr_idle_notify_v1.h>
+@@ -144,6 +145,7 @@
+ 
+ 	/* Set this early so that if we fail, the client process will be cleaned up properly. */
+ 	*pid_out = pid;
++	server->primary_client_pid = pid;
+ 
+ 	if (!set_cloexec(fd[0]) || !set_cloexec(fd[1])) {
+ 		return false;
+@@ -232,6 +234,7 @@
+ 		" -m extend Extend the display across all connected outputs (default)\n"
+ 		" -m last Use only the last connected output\n"
+ 		" -s\t Allow VT switching\n"
++		" -u\t Show other clients' windows under APPLICATION's\n"
+ 		" -v\t Show the version number and exit\n"
+ 		"\n"
+ 		" Use -- when you want to pass arguments to APPLICATION\n",
+@@ -242,7 +245,7 @@
+ parse_args(struct cg_server *server, int argc, char *argv[])
+ {
+ 	int c;
+-	while ((c = getopt(argc, argv, "dDhm:sv")) != -1) {
++	while ((c = getopt(argc, argv, "dDhm:suv")) != -1) {
+ 		switch (c) {
+ 		case 'd':
+ 			server->xdg_decoration = true;
+@@ -263,6 +266,9 @@
+ 		case 's':
+ 			server->allow_vt_switch = true;
+ 			break;
++		case 'u':
++			server->others_under = true;
++			break;
+ 		case 'v':
+ 			fprintf(stdout, "Cage version " CAGE_VERSION "\n");
+ 			exit(0);
+@@ -427,6 +433,13 @@
+ 	server.new_xdg_popup.notify = handle_new_xdg_popup;
+ 	wl_signal_add(&xdg_shell->events.new_popup, &server.new_xdg_popup);
+ 
++	server.foreign_toplevel_manager = wlr_foreign_toplevel_manager_v1_create(server.wl_display);
++	if (!server.foreign_toplevel_manager) {
++		wlr_log(WLR_ERROR, "Unable to create the foreign toplevel manager");
++		ret = 1;
++		goto end;
++	}
++
+ 	struct wlr_xdg_decoration_manager_v1 *xdg_decoration_manager =
+ 		wlr_xdg_decoration_manager_v1_create(server.wl_display);
+ 	if (!xdg_decoration_manager) {
+diff -Naur a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -36,6 +36,7 @@
+ endif
+ 
+ wlroots        = dependency('wlroots-0.19', fallback: ['wlroots', 'wlroots'])
++pixman         = dependency('pixman-1')
+ wayland_protos = dependency('wayland-protocols', version: '>=1.14')
+ wayland_server = dependency('wayland-server')
+ xkbcommon      = dependency('xkbcommon')
+@@ -143,6 +144,7 @@
+     server_protos,
+     wayland_server,
+     wlroots,
++    pixman,
+     xkbcommon,
+     math,
+   ],
+diff -Naur a/seat.c b/seat.c
+--- a/seat.c
++++ b/seat.c
+@@ -934,6 +934,12 @@
+ 		return;
+ 	}
+ 
++	/* A view shown under the application's gets the pointer and touches,
++	   not the keyboard. */
++	if (!view->foremost && view_get_foremost(server)) {
++		return;
++	}
++
+ #if CAGE_HAS_XWAYLAND
+ 	if (view->type == CAGE_XWAYLAND_VIEW) {
+ 		struct cg_xwayland_view *xwayland_view = xwayland_view_from_view(view);
+diff -Naur a/server.h b/server.h
+--- a/server.h
++++ b/server.h
+@@ -3,12 +3,15 @@
+ 
+ #include "config.h"
+ 
++#include <sys/types.h>
+ #include <wayland-server-core.h>
++#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+ #include <wlr/types/wlr_idle_inhibit_v1.h>
+ #include <wlr/types/wlr_idle_notify_v1.h>
+ #include <wlr/types/wlr_output_layout.h>
+ #include <wlr/types/wlr_relative_pointer_v1.h>
+ #include <wlr/types/wlr_xdg_decoration_v1.h>
++#include <wlr/util/box.h>
+ #include <wlr/util/log.h>
+ 
+ #if CAGE_HAS_XWAYLAND
+@@ -23,6 +26,14 @@
+ struct cg_server {
+ 	struct wl_display *wl_display;
+ 	struct wl_list views;
++	/* With -u, the views of the application Cage was started for stay in
++	 * front and keep the keyboard, and other clients' views are shown
++	 * under them: one at a time, in the part of the screen that the
++	 * application's window does not cover. */
++	bool others_under;
++	pid_t primary_client_pid;
++	struct wlr_box clear_box;
++	struct wlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager;
+ 	struct wlr_backend *backend;
+ 	struct wlr_renderer *renderer;
+ 	struct wlr_allocator *allocator;
+diff -Naur a/view.c b/view.c
+--- a/view.c
++++ b/view.c
+@@ -9,12 +9,16 @@
+ #define _POSIX_C_SOURCE 200809L
+ 
+ #include <assert.h>
++#include <pixman.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/types.h>
+ #include <wayland-server-core.h>
++#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_scene.h>
++#include <wlr/util/box.h>
+ 
+ #include "output.h"
+ #include "seat.h"
+@@ -52,6 +56,159 @@
+ 	view->impl->activate(view, activate);
+ }
+ 
++/* Whether a client is the application Cage was started for, and its views
++ * therefore the ones the others are shown under. */
++bool
++view_client_is_primary(struct cg_server *server, struct wl_client *client)
++{
++	pid_t pid = 0;
++	wl_client_get_credentials(client, &pid, NULL, NULL);
++	return server->others_under && pid != 0 && pid == server->primary_client_pid;
++}
++
++/* A view the others are shown under, if there is one. */
++struct cg_view *
++view_get_foremost(struct cg_server *server)
++{
++	struct cg_view *view;
++	wl_list_for_each (view, &server->views, link) {
++		if (view->foremost) {
++			return view;
++		}
++	}
++	return NULL;
++}
++
++/* Of the views shown under the application's, one is shown at a time: this
++ * one, or with NULL none. They are never given the keyboard, so this is
++ * also where such a view learns whether it is the one showing. */
++static void
++view_show_only(struct cg_server *server, struct cg_view *view)
++{
++	struct cg_view *other;
++	wl_list_for_each (other, &server->views, link) {
++		if (other->foremost) {
++			continue;
++		}
++		bool shown = other == view;
++		wlr_scene_node_set_enabled(&other->scene_tree->node, shown);
++		view_activate(other, shown);
++		if (other->foreign_toplevel) {
++			wlr_foreign_toplevel_handle_v1_set_minimized(other->foreign_toplevel, !shown);
++			wlr_foreign_toplevel_handle_v1_set_activated(other->foreign_toplevel, shown);
++		}
++	}
++}
++
++/* The part of the screen that the application's window does not cover - by
++ * its own account, its opaque region - is where the other clients' views
++ * go. */
++void
++view_update_clear_box(struct cg_view *view)
++{
++	struct cg_server *server = view->server;
++	if (!view->foremost || !view->wlr_surface || !view_is_primary(view)) {
++		return;
++	}
++
++	struct wlr_box layout_box;
++	wlr_output_layout_get_box(server->output_layout, NULL, &layout_box);
++
++	pixman_region32_t clear, opaque;
++	pixman_region32_init_rect(&clear, layout_box.x, layout_box.y, layout_box.width, layout_box.height);
++	pixman_region32_init(&opaque);
++	pixman_region32_copy(&opaque, &view->wlr_surface->opaque_region);
++	pixman_region32_translate(&opaque, view->lx, view->ly);
++	pixman_region32_subtract(&clear, &clear, &opaque);
++	pixman_region32_fini(&opaque);
++
++	/* A screen covered altogether leaves them where they were. */
++	struct wlr_box box = server->clear_box;
++	if (pixman_region32_not_empty(&clear)) {
++		pixman_box32_t *extents = pixman_region32_extents(&clear);
++		box.x = extents->x1;
++		box.y = extents->y1;
++		box.width = extents->x2 - extents->x1;
++		box.height = extents->y2 - extents->y1;
++	}
++	pixman_region32_fini(&clear);
++
++	if (box.x == server->clear_box.x && box.y == server->clear_box.y && box.width == server->clear_box.width &&
++	    box.height == server->clear_box.height) {
++		return;
++	}
++	server->clear_box = box;
++
++	struct cg_view *other;
++	wl_list_for_each (other, &server->views, link) {
++		if (!other->foremost) {
++			view_position(other);
++		}
++	}
++}
++
++void
++view_update_foreign_toplevel(struct cg_view *view)
++{
++	if (!view->foreign_toplevel) {
++		return;
++	}
++
++	const char *title = view->impl->get_title(view);
++	if (title) {
++		wlr_foreign_toplevel_handle_v1_set_title(view->foreign_toplevel, title);
++	}
++	const char *app_id = view->impl->get_app_id(view);
++	if (app_id) {
++		wlr_foreign_toplevel_handle_v1_set_app_id(view->foreign_toplevel, app_id);
++	}
++}
++
++static void
++handle_foreign_toplevel_request_activate(struct wl_listener *listener, void *data)
++{
++	struct cg_view *view = wl_container_of(listener, view, foreign_toplevel_request_activate);
++
++	if (!view->foremost && view_get_foremost(view->server)) {
++		view_show_only(view->server, view);
++		return;
++	}
++	wlr_scene_node_raise_to_top(&view->scene_tree->node);
++	seat_set_focus(view->server->seat, view);
++}
++
++static void
++handle_foreign_toplevel_request_minimize(struct wl_listener *listener, void *data)
++{
++	struct cg_view *view = wl_container_of(listener, view, foreign_toplevel_request_minimize);
++	struct wlr_foreign_toplevel_handle_v1_minimized_event *event = data;
++
++	/* Only a view shown under the application's can be hidden. */
++	if (view->foremost || !view_get_foremost(view->server)) {
++		return;
++	}
++	if (!event->minimized) {
++		view_show_only(view->server, view);
++	} else if (view->scene_tree->node.enabled) {
++		view_show_only(view->server, NULL);
++	}
++}
++
++static void
++view_create_foreign_toplevel(struct cg_view *view)
++{
++	view->foreign_toplevel = wlr_foreign_toplevel_handle_v1_create(view->server->foreign_toplevel_manager);
++	if (!view->foreign_toplevel) {
++		return;
++	}
++
++	view->foreign_toplevel_request_activate.notify = handle_foreign_toplevel_request_activate;
++	wl_signal_add(&view->foreign_toplevel->events.request_activate, &view->foreign_toplevel_request_activate);
++	view->foreign_toplevel_request_minimize.notify = handle_foreign_toplevel_request_minimize;
++	wl_signal_add(&view->foreign_toplevel->events.request_minimize, &view->foreign_toplevel_request_minimize);
++	view_update_foreign_toplevel(view);
++}
++
+ static bool
+ view_extends_output_layout(struct cg_view *view, struct wlr_box *layout_box)
+ {
+@@ -94,7 +251,9 @@
+ 	struct wlr_box layout_box;
+ 	wlr_output_layout_get_box(view->server->output_layout, NULL, &layout_box);
+ 
+-	if (view_is_primary(view) || view_extends_output_layout(view, &layout_box)) {
++	if (view->server->others_under && !view->foremost && !wlr_box_empty(&view->server->clear_box)) {
++		view_maximize(view, &view->server->clear_box);
++	} else if (view_is_primary(view) || view_extends_output_layout(view, &layout_box)) {
+ 		view_maximize(view, &layout_box);
+ 	} else {
+ 		view_center(view, &layout_box);
+@@ -115,6 +274,13 @@
+ {
+ 	wl_list_remove(&view->link);
+ 
++	if (view->foreign_toplevel) {
++		wl_list_remove(&view->foreign_toplevel_request_activate.link);
++		wl_list_remove(&view->foreign_toplevel_request_minimize.link);
++		wlr_foreign_toplevel_handle_v1_destroy(view->foreign_toplevel);
++		view->foreign_toplevel = NULL;
++	}
++
+ 	wlr_scene_node_destroy(&view->scene_tree->node);
+ 
+ 	view->wlr_surface->data = NULL;
+@@ -141,9 +307,23 @@
+ #endif
+ 	{
+ 		view_position(view);
++		view_create_foreign_toplevel(view);
+ 	}
+ 
+ 	wl_list_insert(&view->server->views, &view->link);
++
++	/* The views shown under the application's are hidden until asked for:
++	   this one if it is one, all of them if it is the application's. */
++	if (view->foremost) {
++		view_update_clear_box(view);
++		view_show_only(view->server, NULL);
++	} else if (view_get_foremost(view->server)) {
++		wlr_scene_node_lower_to_bottom(&view->scene_tree->node);
++		wlr_scene_node_set_enabled(&view->scene_tree->node, false);
++		if (view->foreign_toplevel) {
++			wlr_foreign_toplevel_handle_v1_set_minimized(view->foreign_toplevel, true);
++		}
++	}
+ 	seat_set_focus(view->server->seat, view);
+ }
+ 
+diff -Naur a/view.h b/view.h
+--- a/view.h
++++ b/view.h
+@@ -6,6 +6,7 @@
+ #include <stdbool.h>
+ #include <wayland-server-core.h>
+ #include <wlr/types/wlr_compositor.h>
++#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+ #include <wlr/types/wlr_xdg_shell.h>
+ #include <wlr/util/box.h>
+ #if CAGE_HAS_XWAYLAND
+@@ -30,12 +31,22 @@
+ 	/* The view has a position in layout coordinates. */
+ 	int lx, ly;
+ 
++	/* Whether this is a view the others are shown under: see
++	 * cg_server::others_under. */
++	bool foremost;
++
++	/* The view as other clients are told of it, and can ask for it. */
++	struct wlr_foreign_toplevel_handle_v1 *foreign_toplevel;
++	struct wl_listener foreign_toplevel_request_activate;
++	struct wl_listener foreign_toplevel_request_minimize;
++
+ 	enum cg_view_type type;
+ 	const struct cg_view_impl *impl;
+ };
+ 
+ struct cg_view_impl {
+ 	char *(*get_title)(struct cg_view *view);
++	char *(*get_app_id)(struct cg_view *view);
+ 	void (*get_geometry)(struct cg_view *view, int *width_out, int *height_out);
+ 	bool (*is_primary)(struct cg_view *view);
+ 	bool (*is_transient_for)(struct cg_view *child, struct cg_view *parent);
+@@ -48,6 +59,10 @@
+ bool view_is_primary(struct cg_view *view);
+ bool view_is_transient_for(struct cg_view *child, struct cg_view *parent);
+ void view_activate(struct cg_view *view, bool activate);
++bool view_client_is_primary(struct cg_server *server, struct wl_client *client);
++struct cg_view *view_get_foremost(struct cg_server *server);
++void view_update_clear_box(struct cg_view *view);
++void view_update_foreign_toplevel(struct cg_view *view);
+ void view_position(struct cg_view *view);
+ void view_position_all(struct cg_server *server);
+ void view_unmap(struct cg_view *view);
+diff -Naur a/xdg_shell.c b/xdg_shell.c
+--- a/xdg_shell.c
++++ b/xdg_shell.c
+@@ -124,6 +124,13 @@
+ 	return xdg_shell_view->xdg_toplevel->title;
+ }
+ 
++static char *
++get_app_id(struct cg_view *view)
++{
++	struct cg_xdg_shell_view *xdg_shell_view = xdg_shell_view_from_view(view);
++	return xdg_shell_view->xdg_toplevel->app_id;
++}
++
+ static void
+ get_geometry(struct cg_view *view, int *width_out, int *height_out)
+ {
+@@ -205,6 +212,22 @@
+ }
+ 
+ static void
++handle_xdg_toplevel_set_title(struct wl_listener *listener, void *data)
++{
++	struct cg_xdg_shell_view *xdg_shell_view = wl_container_of(listener, xdg_shell_view, set_title);
++
++	view_update_foreign_toplevel(&xdg_shell_view->view);
++}
++
++static void
++handle_xdg_toplevel_set_app_id(struct wl_listener *listener, void *data)
++{
++	struct cg_xdg_shell_view *xdg_shell_view = wl_container_of(listener, xdg_shell_view, set_app_id);
++
++	view_update_foreign_toplevel(&xdg_shell_view->view);
++}
++
++static void
+ handle_xdg_toplevel_unmap(struct wl_listener *listener, void *data)
+ {
+ 	struct cg_xdg_shell_view *xdg_shell_view = wl_container_of(listener, xdg_shell_view, unmap);
+@@ -228,6 +251,7 @@
+ 	struct cg_xdg_shell_view *xdg_shell_view = wl_container_of(listener, xdg_shell_view, commit);
+ 
+ 	if (!xdg_shell_view->xdg_toplevel->base->initial_commit) {
++		view_update_clear_box(&xdg_shell_view->view);
+ 		return;
+ 	}
+ 
+@@ -249,6 +273,8 @@
+ 	wl_list_remove(&xdg_shell_view->unmap.link);
+ 	wl_list_remove(&xdg_shell_view->destroy.link);
+ 	wl_list_remove(&xdg_shell_view->request_fullscreen.link);
++	wl_list_remove(&xdg_shell_view->set_title.link);
++	wl_list_remove(&xdg_shell_view->set_app_id.link);
+ 	xdg_shell_view->xdg_toplevel = NULL;
+ 
+ 	view_destroy(view);
+@@ -256,6 +282,7 @@
+ 
+ static const struct cg_view_impl xdg_shell_view_impl = {
+ 	.get_title = get_title,
++	.get_app_id = get_app_id,
+ 	.get_geometry = get_geometry,
+ 	.is_primary = is_primary,
+ 	.is_transient_for = is_transient_for,
+@@ -278,6 +305,8 @@
+ 
+ 	view_init(&xdg_shell_view->view, server, CAGE_XDG_SHELL_VIEW, &xdg_shell_view_impl);
+ 	xdg_shell_view->xdg_toplevel = toplevel;
++	xdg_shell_view->view.foremost =
++		view_client_is_primary(server, wl_resource_get_client(toplevel->base->resource));
+ 
+ 	xdg_shell_view->commit.notify = handle_xdg_toplevel_commit;
+ 	wl_signal_add(&toplevel->base->surface->events.commit, &xdg_shell_view->commit);
+@@ -289,6 +318,10 @@
+ 	wl_signal_add(&toplevel->events.destroy, &xdg_shell_view->destroy);
+ 	xdg_shell_view->request_fullscreen.notify = handle_xdg_toplevel_request_fullscreen;
+ 	wl_signal_add(&toplevel->events.request_fullscreen, &xdg_shell_view->request_fullscreen);
++	xdg_shell_view->set_title.notify = handle_xdg_toplevel_set_title;
++	wl_signal_add(&toplevel->events.set_title, &xdg_shell_view->set_title);
++	xdg_shell_view->set_app_id.notify = handle_xdg_toplevel_set_app_id;
++	wl_signal_add(&toplevel->events.set_app_id, &xdg_shell_view->set_app_id);
+ 
+ 	toplevel->base->data = xdg_shell_view;
+ }
+diff -Naur a/xdg_shell.h b/xdg_shell.h
+--- a/xdg_shell.h
++++ b/xdg_shell.h
+@@ -16,6 +16,8 @@
+ 	struct wl_listener unmap;
+ 	struct wl_listener map;
+ 	struct wl_listener request_fullscreen;
++	struct wl_listener set_title;
++	struct wl_listener set_app_id;
+ };
+ 
+ struct cg_xdg_decoration {
+diff -Naur a/xwayland.c b/xwayland.c
+--- a/xwayland.c
++++ b/xwayland.c
+@@ -37,6 +37,13 @@
+ 	return xwayland_view->xwayland_surface->title;
+ }
+ 
++static char *
++get_app_id(struct cg_view *view)
++{
++	struct cg_xwayland_view *xwayland_view = xwayland_view_from_view(view);
++	return xwayland_view->xwayland_surface->class;
++}
++
+ static void
+ get_geometry(struct cg_view *view, int *width_out, int *height_out)
+ {
+@@ -148,6 +155,7 @@
+ 
+ static const struct cg_view_impl xwayland_view_impl = {
+ 	.get_title = get_title,
++	.get_app_id = get_app_id,
+ 	.get_geometry = get_geometry,
+ 	.is_primary = is_primary,
+ 	.is_transient_for = is_transient_for,

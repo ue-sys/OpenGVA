@@ -1,0 +1,44 @@
+#!/bin/sh
+#
+# The display, and the HMI on it: what opengva-hmi.service runs, as the
+# unprivileged "hmi" user, in a logind session on tty1 - which is what lets
+# the compositor have the display and the input devices:
+#
+#   cage (owns the display and input devices) -> opengva-hmi, the window in front
+#
+# Other programs, whose windows the HMI shows under its own, are services of
+# their own, started with on-display.
+#
+# Lines printed here and by the HMI that start "OPENGVA " are timing markers
+# ("uptime" is seconds since the kernel started).
+
+echo "OPENGVA session-start uptime=$(cut -d' ' -f1 /proc/uptime)" >&2
+
+# The HMI makes this when its first frame is on the screen: the programs it
+# shows wait for it (on-display), and are not to take the last display's.
+rm -f "$XDG_RUNTIME_DIR/opengva-hmi.ready"
+
+# Whether there is a GPU to draw with: a render node that is not a virtual
+# machine's with no GPU lent to it (virtio's first feature says which).
+gpu() {
+	for node in /sys/class/drm/renderD*; do
+		[ -e "$node" ] || continue
+		for features in "$node"/device/virtio*/features; do
+			[ -e "$features" ] || return 0
+			[ "$(cut -c 1 "$features")" != 1 ] || return 0
+		done
+	done
+	return 1
+}
+# Without one the compositor composes with the CPU itself. Left to choose, it
+# takes OpenGL as Mesa does it in software, and the frame the HMI has painted
+# is then tens of seconds in reaching the screen.
+gpu || export WLR_RENDERER=pixman
+
+# In place of this script, not under it: what the service is asked to stop,
+# is then the display.
+#
+# cage -u: the HMI's window stays in front, and other programs' windows go
+# under it (os/hmi/cage). The rest of what it and the HMI are told is in
+# opengva-hmi.service.
+exec cage -u -- /usr/bin/opengva-hmi

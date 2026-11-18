@@ -1,0 +1,15 @@
+[package]
+name = "hmi-access"
+description = "Who may have what at the OpenGVA HMI: roles, the PIN asked for when a role is needed, and who is logged in. No windowing, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The PIN is typed on the HMI's one number pad, which is hmi-entry's.
+hmi-entry = { path = "../hmi-entry" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

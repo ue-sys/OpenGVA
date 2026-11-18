@@ -1,0 +1,32 @@
+From 832e88b0c964a324bb09c7af02ed0650b73dfb9b Mon Sep 17 00:00:00 2001
+From: Simon Ser <contact@emersion.fr>
+Date: Sun, 21 Dec 2025 13:50:30 +0100
+Subject: [PATCH] xdg_shell: skip configure in request_fullscreen handler if
+ unmapped
+
+wlr_xdg_surface_schedule_configure() requires the xdg_surface to
+be initialized.
+
+Closes: https://github.com/cage-kiosk/cage/issues/456
+
+Upstream: https://github.com/cage-kiosk/cage/commit/832e88b0c964a324bb09c7af02ed0650b73dfb9b
+[Backported to 0.2.1, where GStreamer's waylandsink sets this off: it
+asks not to be fullscreen before its window's first commit.]
+---
+ xdg_shell.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/xdg_shell.c b/xdg_shell.c
+--- a/xdg_shell.c
++++ b/xdg_shell.c
+@@ -188,6 +188,10 @@
+ {
+ 	struct cg_xdg_shell_view *xdg_shell_view = wl_container_of(listener, xdg_shell_view, request_fullscreen);
+ 
++	if (!xdg_shell_view->xdg_toplevel->base->surface->mapped) {
++		return;
++	}
++
+ 	/**
+ 	 * Certain clients do not like figuring out their own window geometry if they
+ 	 * display in fullscreen mode, so we set it here.

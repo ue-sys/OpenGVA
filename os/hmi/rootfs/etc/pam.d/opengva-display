@@ -1,0 +1,6 @@
+# The PAM service of the display (opengva-hmi.service): systemd opens a
+# session for the "hmi" user on tty1 with it, and asks for nothing. The
+# session is logind's (pam_systemd), and that is what lends the compositor
+# the display and the input devices.
+account   required  pam_permit.so
+session   required  pam_systemd.so

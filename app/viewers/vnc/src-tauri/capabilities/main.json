@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "The viewer's window has its own three commands. Nothing of Tauri's is open to it.",
+  "windows": ["main"],
+  "permissions": []
+}

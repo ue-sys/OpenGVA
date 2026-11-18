@@ -1,0 +1,8 @@
+# The PAM service of greetd's greeter (/usr/libexec/opengva/greeter), which
+# greetd starts as the HMI's user without asking anything: it only says
+# where greetd is listening, and waits.
+
+auth      required  pam_permit.so
+account   required  pam_permit.so
+password  required  pam_deny.so
+session   required  pam_permit.so

@@ -1,0 +1,24 @@
+[package]
+name = "opengva-vnc-viewer"
+description = "OpenGVA VNC viewer: a window with a VNC server's screen in it, for a functional area to be given to."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+# The window Tauri opens is a GTK one, and takes its name from the program's
+# as GLib has it.
+glib = "0.18"
+serde = { version = "1", features = ["derive"] }
+# As the HMI has it: no X11 and no desktop bus, which the image is without.
+tauri = { version = "2", default-features = false, features = ["wry", "compression"] }
+vnc-view = { path = "../crates/vnc-view" }
+
+[features]
+# Serve the bundled page instead of a development server. Every build that
+# is not "tauri dev" sets this; without it the binary looks for a dev server.
+custom-protocol = ["tauri/custom-protocol"]

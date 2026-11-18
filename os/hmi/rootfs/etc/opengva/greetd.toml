@@ -1,0 +1,23 @@
+# greetd, as the OpenGVA HMI's verifier (/usr/libexec/opengva/verifier runs
+# it with this).
+#
+# greetd is made to log people in at a terminal: it starts a "greeter", which
+# asks who they are and tells greetd, and greetd checks with PAM and starts
+# their session in the greeter's place. Here only the checking is used. The
+# display is the HMI's from the moment the crew station is switched on and is
+# never anyone else's, so:
+
+[terminal]
+# greetd has no terminal, and touches none.
+vt = "none"
+
+[general]
+# Nothing is run for anyone, so there is nobody's profile to read.
+source_profile = false
+
+[default_session]
+# The greeter says where greetd is listening and then waits. It runs as the
+# HMI's user, which is what makes the socket one the HMI may use; it is the
+# HMI that asks (app/src-tauri/src/verifier.rs).
+command = "/usr/libexec/opengva/greeter"
+user = "hmi"

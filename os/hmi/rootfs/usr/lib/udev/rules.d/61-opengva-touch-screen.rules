@@ -1,0 +1,7 @@
+# A touch screen is not also a mouse. Some say they are both - they have a
+# mouse's buttons among what they can report - and are then given a pointer
+# on the display that no hand is holding. A crew station is touched: a
+# pointer is for a mouse, if one is ever plugged in.
+# (The device and the node that events are read from both say what it is,
+# and both are asked.)
+SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", ENV{ID_INPUT_MOUSE}=="1", ENV{ID_INPUT_MOUSE}=""

@@ -1,0 +1,21 @@
+[package]
+name = "vnc-view"
+description = "A view of a VNC server's screen: what its configuration says, and the way from the page that shows it to the server. No windowing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+rand = "0.10"
+# What the kernel is asked of the connection to the server: std has no word
+# for how soon a server that has gone silent is to be missed.
+socket2 = { version = "0.6", features = ["all"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "time"] }
+# The WebSocket the page speaks down. Only its accepting end is wanted.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+# The page's end of the WebSocket, for the tests to be the page with.
+tungstenite = "0.30"

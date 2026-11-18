@@ -1,0 +1,14 @@
+[package]
+name = "hmi-core"
+description = "OpenGVA HMI state and the frame it presents. No windowing, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Who may have what: roles, and the PIN asked for when one is needed.
+hmi-access = { path = "../hmi-access" }
+hmi-entry = { path = "../hmi-entry" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

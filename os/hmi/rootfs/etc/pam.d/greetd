@@ -1,0 +1,25 @@
+# How a PIN is checked for the OpenGVA HMI: the PAM service greetd asks of,
+# on the HMI's behalf (/etc/opengva/greetd.toml).
+#
+# An account's PIN is its password, and pam_unix checks it. pam_faillock
+# counts the wrong ones: after too many (/etc/opengva/faillock.conf) it
+# refuses the account for a while without the PIN's being looked at, and
+# says so and for how long - which the HMI shows. This is the arrangement
+# pam_faillock(8) gives.
+
+auth      requisite                pam_faillock.so preauth conf=/etc/opengva/faillock.conf
+auth      [success=1 default=bad]  pam_unix.so
+auth      [default=die]            pam_faillock.so authfail conf=/etc/opengva/faillock.conf
+auth      sufficient               pam_faillock.so authsucc conf=/etc/opengva/faillock.conf
+auth      required                 pam_deny.so
+
+# An account that has been shut is not one whose PIN is any good.
+account   required                 pam_unix.so
+
+# A PIN is set by whoever looks after the crew station, on its console: not
+# from here.
+password  required                 pam_deny.so
+
+# Only the checking is used. Nothing is started for an account, whoever asks
+# greetd to.
+session   required                 pam_deny.so

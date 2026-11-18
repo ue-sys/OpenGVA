@@ -1,0 +1,616 @@
+A picture for the displays to start with, until the application has drawn
+
+Cage gives a display an empty frame when it takes it, and the display is
+black from then until the application has put something on it - which for
+an application that takes a while to start, on a machine that had a
+picture on its screen from the boot loader, is a black gap between two
+pictures.
+
+With CAGE_SPLASH in the environment naming a PNG file, a display is given
+that picture instead: it is in the first frame Cage gives the display, and
+stays until the application has drawn. The picture is in the middle of
+the display and the rest of the display is the colour of the picture's
+first pixel. It is shown at the largest whole fraction of its size - all
+of it, a half, a third - that is no wider than half the display and no
+taller than the display, each pixel the mean of the pixels it stands for,
+so that a picture drawn large is sharp on a display of any size. Only that
+mean is rounded: a boot loader that does the same sums has shown the same
+picture the same to the pixel (GRUB does, with the patch that gives its
+background_image a splash mode), and nothing is seen to change when Cage
+takes the display from it. What alpha the picture has is not looked at.
+
+When the application has drawn is for the application to say, since its
+window is mapped before it has anything to show, and a window that is
+partly clear by design - the OpenGVA HMI's, which shows other programs'
+windows through itself - is clear all over until then. It has drawn when
+a window says that some of itself is opaque: with -u a window of the
+application Cage was started for, and without it any window. Its word is
+checked, though. A toolkit sends what it has been told is opaque with the
+next thing it draws, which may be a frame before the one that is true of,
+and the window is still clear then: the splash taken away at that would
+leave the display black until the frame came. So a pixel of what the
+window calls opaque is looked at, and the splash stays until that pixel
+is. Then it is taken away and not shown again, and what is behind the
+windows is what it always was.
+
+The look is taken after a frame has been given to a display, and not when
+the window commits. With a GPU, looking at a pixel that is still being
+drawn waits for the drawing, and the frame the pixel is in is not to wait
+for that: it goes to the display with the splash still under its windows,
+and the splash is gone from the next.
+
+It is an environment variable and not an option so that a script written
+for this Cage still starts one without the patch.
+
+The picture is read with libpng, which Cage now needs.
+
+Upstream: not submitted
+
+diff -Naur a/cage.1.scd b/cage.1.scd
+--- a/cage.1.scd
++++ b/cage.1.scd
+@@ -81,6 +81,18 @@
+ 
+ # ENVIRONMENT
+ 
++_CAGE_SPLASH_
++	A picture, in a PNG file, for every display to start with in place of
++	nothing: it is on a display from the first frame Cage gives it until
++	the application has drawn. The picture is in the middle of the
++	display, at the largest whole fraction of its size (all of it, a
++	half, a third ...) that is no wider than half the display, and the
++	rest of the display is the colour of the picture's first pixel. The
++	application has drawn when a window says that some of itself is
++	opaque, and has painted it so: with -u a window of the application
++	Cage was started for, and without it any window. The picture is not
++	shown again after that.
++
+ _DISPLAY_
+ 	If compiled with Xwayland support, this will be set to the name of the
+ 	X display used for Xwayland. Otherwise, probe the X11 backend.
+diff -Naur a/cage.c b/cage.c
+--- a/cage.c
++++ b/cage.c
+@@ -56,6 +56,7 @@
+ #include "output.h"
+ #include "seat.h"
+ #include "server.h"
++#include "splash.h"
+ #include "view.h"
+ #include "xdg_shell.h"
+ #if CAGE_HAS_XWAYLAND
+@@ -367,6 +368,12 @@
+ 
+ 	server.scene_output_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
+ 
++	/* What the displays start with, before the backend finds them. */
++	const char *splash = getenv("CAGE_SPLASH");
++	if (splash && *splash) {
++		splash_load(&server, splash);
++	}
++
+ 	struct wlr_compositor *compositor = wlr_compositor_create(server.wl_display, 6, server.renderer);
+ 	if (!compositor) {
+ 		wlr_log(WLR_ERROR, "Unable to create the wlroots compositor");
+@@ -639,6 +646,7 @@
+ 	if (sigchld_source) {
+ 		wl_event_source_remove(sigchld_source);
+ 	}
++	splash_end(&server);
+ 	seat_destroy(server.seat);
+ 	/* This function is not null-safe, but we only ever get here
+ 	   with a proper wl_display. */
+diff -Naur a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -37,6 +37,7 @@
+ 
+ wlroots        = dependency('wlroots-0.19', fallback: ['wlroots', 'wlroots'])
+ pixman         = dependency('pixman-1')
++libpng         = dependency('libpng')
+ wayland_protos = dependency('wayland-protocols', version: '>=1.14')
+ wayland_server = dependency('wayland-server')
+ xkbcommon      = dependency('xkbcommon')
+@@ -116,6 +117,7 @@
+   'idle_inhibit_v1.c',
+   'output.c',
+   'seat.c',
++  'splash.c',
+   'view.c',
+   'xdg_shell.c',
+ ]
+@@ -128,6 +130,7 @@
+   'output.h',
+   'seat.h',
+   'server.h',
++  'splash.h',
+   'view.h',
+   'xdg_shell.h',
+ ]
+@@ -145,6 +148,7 @@
+     wayland_server,
+     wlroots,
+     pixman,
++    libpng,
+     xkbcommon,
+     math,
+   ],
+diff -Naur a/output.c b/output.c
+--- a/output.c
++++ b/output.c
+@@ -37,6 +37,7 @@
+ #include "output.h"
+ #include "seat.h"
+ #include "server.h"
++#include "splash.h"
+ #include "view.h"
+ #if CAGE_HAS_XWAYLAND
+ #include "xwayland.h"
+@@ -146,6 +147,8 @@
+ 	struct timespec now = {0};
+ 	clock_gettime(CLOCK_MONOTONIC, &now);
+ 	wlr_scene_output_send_frame_done(output->scene_output, &now);
++
++	view_update_splash(output->server);
+ }
+ 
+ static void
+@@ -180,6 +183,7 @@
+ 	struct cg_server *server = wl_container_of(listener, server, output_layout_change);
+ 
+ 	view_position_all(server);
++	splash_place(server);
+ 	update_output_manager_config(server);
+ }
+ 
+@@ -211,6 +215,9 @@
+ 	wl_list_remove(&output->frame.link);
+ 	wl_list_remove(&output->link);
+ 
++	if (output->splash) {
++		wlr_scene_node_destroy(&output->splash->node);
++	}
+ 	output_layout_remove(output);
+ 
+ 	free(output);
+@@ -301,12 +308,28 @@
+ 			wlr_output->scale);
+ 	}
+ 
++	/* With a splash, the first frame the display is given is the scene's,
++	 * which has the splash in it, and not an empty one: the display has
++	 * its picture from the moment it is taken. Where it will be among
++	 * the displays is not known yet, and does not matter to it. */
++	if (server->splash) {
++		struct wlr_box box = {.width = wlr_output->width, .height = wlr_output->height};
++		if (state.committed & WLR_OUTPUT_STATE_MODE) {
++			box.width = state.mode->width;
++			box.height = state.mode->height;
++		}
++		splash_show(output, &box);
++		wlr_scene_output_build_state(output->scene_output, &state, NULL);
++	}
++
+ 	wlr_log(WLR_DEBUG, "Enabling new output %s", wlr_output->name);
+ 	if (wlr_output_commit_state(wlr_output, &state)) {
+ 		output_layout_add_auto(output);
+ 	}
++	wlr_output_state_finish(&state);
+ 
+ 	view_position_all(output->server);
++	splash_place(server);
+ 	update_output_manager_config(output->server);
+ }
+ 
+diff -Naur a/output.h b/output.h
+--- a/output.h
++++ b/output.h
+@@ -11,6 +11,10 @@
+ 	struct cg_server *server;
+ 	struct wlr_output *wlr_output;
+ 	struct wlr_scene_output *scene_output;
++	/* This display's splash, while there is one, and the size of display
++	 * it was made for (splash.c). */
++	struct wlr_scene_tree *splash;
++	int splash_width, splash_height;
+ 
+ 	struct wl_listener commit;
+ 	struct wl_listener request_state;
+diff -Naur a/server.h b/server.h
+--- a/server.h
++++ b/server.h
+@@ -18,6 +18,8 @@
+ #include <wlr/xwayland.h>
+ #endif
+ 
++struct cg_splash;
++
+ enum cg_multi_output_mode {
+ 	CAGE_MULTI_OUTPUT_MODE_EXTEND,
+ 	CAGE_MULTI_OUTPUT_MODE_LAST,
+@@ -52,6 +54,9 @@
+ 	struct wlr_scene_output_layout *scene_output_layout;
+ 
+ 	struct wlr_scene *scene;
++	/* The picture every display starts with, until the application has
++	 * drawn (splash.c): NULL with none, and once it has. */
++	struct cg_splash *splash;
+ 	/* Includes disabled outputs; depending on the output_mode
+ 	 * some outputs may be disabled. */
+ 	struct wl_list outputs; // cg_output::link
+diff -Naur a/splash.c b/splash.c
+--- a/splash.c
++++ b/splash.c
+@@ -0,0 +1,241 @@
++/*
++ * Cage: A Wayland kiosk.
++ *
++ * See the LICENSE file accompanying this file.
++ *
++ * The splash: a picture that every display starts with, in place of
++ * nothing, until the application has drawn.
++ *
++ * The picture is in the middle of the display, and the rest of the display
++ * is the colour of the picture's first pixel: a logo, on a background of its
++ * own that goes on to the edges. It is shown at the largest whole fraction
++ * of its size (all of it, a half, a third ...) that is no wider than half
++ * the display and no taller than the display, each pixel the mean of the
++ * pixels it stands for: as sharp as it was drawn, on a display of any size.
++ * Nothing here is rounded but that mean, so that whatever showed the same
++ * picture before Cage, by the same sums - a boot loader - showed it the
++ * same to the pixel, and nothing is seen to change when Cage takes the
++ * display.
++ */
++
++#define _POSIX_C_SOURCE 200809L
++
++#include <drm_fourcc.h>
++#include <png.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <wayland-server-core.h>
++#include <wlr/interfaces/wlr_buffer.h>
++#include <wlr/types/wlr_output_layout.h>
++#include <wlr/types/wlr_scene.h>
++#include <wlr/util/log.h>
++
++#include "output.h"
++#include "server.h"
++#include "splash.h"
++
++/* The picture as it was read: four bytes to a pixel - blue, green, red and
++ * one that is not looked at. */
++struct cg_splash {
++	int width, height;
++	uint8_t *pixels;
++};
++
++/* The picture at the size it is shown, for the renderer to read. */
++struct splash_buffer {
++	struct wlr_buffer base;
++	uint8_t *pixels;
++};
++
++static void
++splash_buffer_destroy(struct wlr_buffer *wlr_buffer)
++{
++	struct splash_buffer *buffer = wl_container_of(wlr_buffer, buffer, base);
++	wlr_buffer_finish(wlr_buffer);
++	free(buffer->pixels);
++	free(buffer);
++}
++
++static bool
++splash_buffer_begin_data_ptr_access(struct wlr_buffer *wlr_buffer, uint32_t flags, void **data, uint32_t *format,
++				    size_t *stride)
++{
++	struct splash_buffer *buffer = wl_container_of(wlr_buffer, buffer, base);
++	if (flags & WLR_BUFFER_DATA_PTR_ACCESS_WRITE) {
++		return false;
++	}
++	*data = buffer->pixels;
++	*format = DRM_FORMAT_XRGB8888;
++	*stride = 4 * (size_t) wlr_buffer->width;
++	return true;
++}
++
++static void
++splash_buffer_end_data_ptr_access(struct wlr_buffer *wlr_buffer)
++{
++}
++
++static const struct wlr_buffer_impl splash_buffer_impl = {
++	.destroy = splash_buffer_destroy,
++	.begin_data_ptr_access = splash_buffer_begin_data_ptr_access,
++	.end_data_ptr_access = splash_buffer_end_data_ptr_access,
++};
++
++/* The picture at one n-th of its size. */
++static struct wlr_buffer *
++splash_reduced(const struct cg_splash *splash, int n, int width, int height)
++{
++	struct splash_buffer *buffer = calloc(1, sizeof(struct splash_buffer));
++	uint8_t *pixels = malloc(4 * (size_t) width * height);
++	if (!buffer || !pixels) {
++		free(buffer);
++		free(pixels);
++		return NULL;
++	}
++
++	for (int y = 0; y < height; y++) {
++		for (int x = 0; x < width; x++) {
++			for (int c = 0; c < 4; c++) {
++				unsigned int sum = 0;
++				for (int j = 0; j < n; j++) {
++					const uint8_t *row = splash->pixels + 4 * (size_t) (y * n + j) * splash->width;
++					for (int i = 0; i < n; i++) {
++						sum += row[4 * (x * n + i) + c];
++					}
++				}
++				pixels[4 * ((size_t) y * width + x) + c] = (sum + n * n / 2) / (n * n);
++			}
++		}
++	}
++
++	buffer->pixels = pixels;
++	wlr_buffer_init(&buffer->base, &splash_buffer_impl, width, height);
++	return &buffer->base;
++}
++
++/* Read the picture the displays are to start with: a PNG file. */
++void
++splash_load(struct cg_server *server, const char *path)
++{
++	png_image image = {.version = PNG_IMAGE_VERSION};
++	if (!png_image_begin_read_from_file(&image, path)) {
++		wlr_log(WLR_ERROR, "No splash: %s: %s", path, image.message);
++		return;
++	}
++	image.format = PNG_FORMAT_BGRA;
++
++	struct cg_splash *splash = calloc(1, sizeof(struct cg_splash));
++	uint8_t *pixels = malloc(PNG_IMAGE_SIZE(image));
++	if (!splash || !pixels || !png_image_finish_read(&image, NULL, pixels, 0, NULL)) {
++		wlr_log(WLR_ERROR, "No splash: %s: %s", path, image.message);
++		png_image_free(&image);
++		free(splash);
++		free(pixels);
++		return;
++	}
++
++	splash->width = image.width;
++	splash->height = image.height;
++	splash->pixels = pixels;
++	server->splash = splash;
++}
++
++/* Give a display its splash, or fit the one it has to the display as it is
++ * now: the box is the display's, in the layout. A display that has no place
++ * there has no splash. */
++void
++splash_show(struct cg_output *output, const struct wlr_box *box)
++{
++	struct cg_server *server = output->server;
++	struct cg_splash *splash = server->splash;
++	if (!splash) {
++		return;
++	}
++
++	if (output->splash && output->splash_width == box->width && output->splash_height == box->height) {
++		wlr_scene_node_set_position(&output->splash->node, box->x, box->y);
++		wlr_scene_node_lower_to_bottom(&output->splash->node);
++		return;
++	}
++	if (output->splash) {
++		wlr_scene_node_destroy(&output->splash->node);
++		output->splash = NULL;
++	}
++	if (wlr_box_empty(box)) {
++		return;
++	}
++
++	output->splash = wlr_scene_tree_create(&server->scene->tree);
++	if (!output->splash) {
++		return;
++	}
++	output->splash_width = box->width;
++	output->splash_height = box->height;
++	wlr_scene_node_set_position(&output->splash->node, box->x, box->y);
++	wlr_scene_node_lower_to_bottom(&output->splash->node);
++
++	/* The first pixel's colour, everywhere. */
++	const float colour[4] = {splash->pixels[2] / 255.0f, splash->pixels[1] / 255.0f, splash->pixels[0] / 255.0f,
++				 1.0f};
++	wlr_scene_rect_create(output->splash, box->width, box->height, colour);
++
++	/* One pixel of the display for n by n of the picture. */
++	int n = (2 * splash->width + box->width - 1) / box->width;
++	if (n < (splash->height + box->height - 1) / box->height) {
++		n = (splash->height + box->height - 1) / box->height;
++	}
++	int width = splash->width / n;
++	int height = splash->height / n;
++	if (width == 0 || height == 0) {
++		return;
++	}
++
++	struct wlr_buffer *buffer = splash_reduced(splash, n, width, height);
++	if (!buffer) {
++		return;
++	}
++	struct wlr_scene_buffer *picture = wlr_scene_buffer_create(output->splash, buffer);
++	wlr_buffer_drop(buffer);
++	if (picture) {
++		wlr_scene_node_set_position(&picture->node, (box->width - width) / 2, (box->height - height) / 2);
++	}
++}
++
++/* Put each display's splash where the display is now, at the size it is
++ * now, and under everything else. */
++void
++splash_place(struct cg_server *server)
++{
++	if (!server->splash) {
++		return;
++	}
++
++	struct cg_output *output;
++	wl_list_for_each (output, &server->outputs, link) {
++		struct wlr_box box;
++		wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
++		splash_show(output, &box);
++	}
++}
++
++/* The application has drawn: the splash has done its work, and is not shown
++ * again. */
++void
++splash_end(struct cg_server *server)
++{
++	if (!server->splash) {
++		return;
++	}
++
++	struct cg_output *output;
++	wl_list_for_each (output, &server->outputs, link) {
++		if (output->splash) {
++			wlr_scene_node_destroy(&output->splash->node);
++			output->splash = NULL;
++		}
++	}
++
++	free(server->splash->pixels);
++	free(server->splash);
++	server->splash = NULL;
++}
+diff -Naur a/splash.h b/splash.h
+--- a/splash.h
++++ b/splash.h
+@@ -0,0 +1,15 @@
++#ifndef CG_SPLASH_H
++#define CG_SPLASH_H
++
++#include <wlr/util/box.h>
++
++struct cg_output;
++struct cg_server;
++struct cg_splash;
++
++void splash_load(struct cg_server *server, const char *path);
++void splash_show(struct cg_output *output, const struct wlr_box *box);
++void splash_place(struct cg_server *server);
++void splash_end(struct cg_server *server);
++
++#endif
+diff -Naur a/view.c b/view.c
+--- a/view.c
++++ b/view.c
+@@ -9,12 +9,16 @@
+ #define _POSIX_C_SOURCE 200809L
+ 
+ #include <assert.h>
++#include <drm_fourcc.h>
+ #include <pixman.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/types.h>
+ #include <wayland-server-core.h>
++#include <wlr/render/wlr_texture.h>
++#include <wlr/types/wlr_buffer.h>
++#include <wlr/types/wlr_compositor.h>
+ #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_scene.h>
+@@ -23,6 +27,7 @@
+ #include "output.h"
+ #include "seat.h"
+ #include "server.h"
++#include "splash.h"
+ #include "view.h"
+ #if CAGE_HAS_XWAYLAND
+ #include "xwayland.h"
+@@ -178,6 +183,64 @@
+ 	}
+ }
+ 
++/* Whether a view has painted what it says is opaque: the pixel in the middle
++ * of the first rectangle of its opaque region is looked at. A client may say
++ * what is opaque before it has drawn the frame that is true of - a toolkit
++ * commits what it has when it next draws anything - and its window is as
++ * clear as it was until that frame comes. Where the pixel cannot be had, the
++ * client's word is taken. */
++static bool
++view_has_painted(struct cg_view *view)
++{
++	struct wlr_surface *surface = view->wlr_surface;
++	int n;
++	const pixman_box32_t *opaque = pixman_region32_rectangles(&surface->opaque_region, &n);
++	if (n == 0) {
++		return false;
++	}
++	if (!surface->buffer || !surface->buffer->texture || surface->current.buffer_width != surface->current.width ||
++	    surface->current.buffer_height != surface->current.height) {
++		return true;
++	}
++
++	uint8_t pixel[4]; /* red, green, blue, alpha */
++	const struct wlr_texture_read_pixels_options options = {
++		.data = pixel,
++		.format = DRM_FORMAT_ABGR8888,
++		.stride = sizeof(pixel),
++		.src_box = {.x = (opaque->x1 + opaque->x2) / 2,
++			    .y = (opaque->y1 + opaque->y2) / 2,
++			    .width = 1,
++			    .height = 1},
++	};
++	return !wlr_texture_read_pixels(surface->buffer->texture, &options) || pixel[3] == 0xff;
++}
++
++/* The splash is shown until the application has drawn, which is for the
++ * application to say, since a window is mapped before its application has
++ * anything to show in it: until a window of its own - with -u; any window,
++ * without - says that some of itself is opaque, and has painted it so.
++ *
++ * This is asked after a frame has been given to a display, and not when a
++ * window commits: looking at a pixel that a GPU is still drawing waits for
++ * the GPU, and the frame the pixel is in is not to wait for the looking. The
++ * splash is under that frame's windows, then, and gone from the next. */
++void
++view_update_splash(struct cg_server *server)
++{
++	if (!server->splash) {
++		return;
++	}
++
++	struct cg_view *view;
++	wl_list_for_each (view, &server->views, link) {
++		if (view->wlr_surface && (view->foremost || !server->others_under) && view_has_painted(view)) {
++			splash_end(server);
++			return;
++		}
++	}
++}
++
+ void
+ view_update_foreign_toplevel(struct cg_view *view)
+ {
+@@ -402,6 +465,7 @@
+ 		view_show_only(view->server, NULL);
+ 	} else if (view_get_foremost(view->server)) {
+ 		wlr_scene_node_lower_to_bottom(&view->scene_tree->node);
++		splash_place(view->server);
+ 		wlr_scene_node_set_enabled(&view->scene_tree->node, false);
+ 		if (view->foreign_toplevel) {
+ 			wlr_foreign_toplevel_handle_v1_set_minimized(view->foreign_toplevel, true);
+diff -Naur a/view.h b/view.h
+--- a/view.h
++++ b/view.h
+@@ -69,6 +69,7 @@
+ struct cg_view *view_get_foremost(struct cg_server *server);
+ struct cg_view *view_get_only_shown(struct cg_server *server);
+ void view_update_clear_box(struct cg_view *view);
++void view_update_splash(struct cg_server *server);
+ void view_update_foreign_toplevel(struct cg_view *view);
+ void view_position(struct cg_view *view);
+ void view_position_all(struct cg_server *server);

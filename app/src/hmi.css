@@ -1,0 +1,653 @@
+/* The GVA display at its reference size, 1024 x 768. */
+
+:root {
+  --green: rgb(0, 255, 0);
+  --yellow: rgb(255, 255, 0);
+  --amber: rgb(255, 153, 0);
+  --red: rgb(255, 0, 0);
+  --grey: rgb(127, 127, 127);
+  --key-green: rgb(0, 75, 0);
+  --white: rgb(255, 255, 255);
+  --black: rgb(0, 0, 0);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  color: var(--white);
+  /* Monospace throughout. DejaVu Sans Mono is what the image ships. */
+  font-family: "DejaVu Sans Mono", "Liberation Mono", monospace;
+  font-size: 18px;
+  user-select: none;
+  cursor: default;
+  /* A touch is a touch on what is drawn there, which the HMI's core is told
+     of: nothing scrolls and nothing zooms. */
+  touch-action: none;
+}
+
+/* Black to the window's edges, whatever the screen's shape - but not before
+   there is a frame drawn in it. Until then the window is clear, and what the
+   display server has behind it is still seen: the picture the display
+   started with, which goes when the bars and labels of the first frame are
+   said to be there (os/board/opengva/patches/cage). Painted black any
+   sooner, the window would be a black screen between that picture and the
+   frame. */
+html:has(.screen),
+html:has(.screen) body {
+  background: var(--black);
+}
+
+/* The display keeps its reference size and is scaled about the centre of
+   whatever screen it is on (App.tsx sets the scale). Positioned rather than
+   centred by a grid: a grid track grows to fit a child larger than the
+   screen, which would push the display off-centre on a smaller one. */
+.display {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1024px;
+  height: 768px;
+  margin: -384px 0 0 -512px;
+}
+
+/* Where the page is another program's picture, the window is clear but for
+   what the HMI draws: the picture is under it. The window lets it through
+   only if nothing on the way down to it is painted. */
+html.see-through,
+html.see-through body,
+.screen.external {
+  background: transparent;
+}
+
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 124px 1fr 124px;
+  grid-template-rows: 14px 34px 1fr 56px;
+  grid-template-areas:
+    "areas  areas  areas"
+    "status status status"
+    "left   page   right"
+    "bottom bottom bottom";
+  background: var(--black);
+}
+
+/* F19 takes the labels of the bezel buttons off the screen, and then the
+   status information bar. What is hidden gives up its room:
+   the bar moves up to the edge of the screen, and the page - the HMI's own,
+   or another program's picture - has what there is beneath it, down to the
+   bottom. The columns the side labels were in stay, so that nothing on a
+   page of the HMI's own moves sideways. */
+.screen.no-labels {
+  grid-template-rows: 0 34px 1fr 0;
+}
+.screen.no-labels.no-status {
+  grid-template-rows: 0 0 1fr 0;
+}
+
+/* Functional-area bars: green where the area has functions, outlined yellow
+   when selected, grey when unavailable, black when not implemented. */
+.areas {
+  grid-area: areas;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 20px;
+  padding: 2px 78px;
+  background: var(--black);
+}
+.area {
+  background: var(--black);
+}
+.area.available,
+.area.selected {
+  background: var(--green);
+}
+.area.selected {
+  outline: 2px solid var(--yellow);
+}
+.area.unavailable {
+  background: var(--grey);
+}
+
+/* Status information bar: date-time group far left, then position, heading,
+   and the alarm counters far right. */
+.status {
+  grid-area: status;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 28px;
+  padding: 0 10px;
+  background: rgb(40, 40, 40);
+  white-space: nowrap;
+}
+.alarms {
+  display: flex;
+  gap: 14px;
+}
+.warnings {
+  color: var(--red);
+}
+.cautions {
+  color: var(--amber);
+}
+.advisories {
+  color: var(--yellow);
+}
+
+/* Soft-key labels: each lines up with the bezel button beside it. */
+.labels {
+  display: grid;
+  gap: 8px;
+}
+/* The bars and the labels go over an overlay. */
+.areas,
+.status,
+.labels {
+  position: relative;
+  z-index: 1;
+}
+.labels.left {
+  grid-area: left;
+  grid-template-rows: repeat(6, 1fr);
+  padding: 10px 0;
+}
+.labels.right {
+  grid-area: right;
+  grid-template-rows: repeat(6, 1fr);
+  padding: 10px 0;
+}
+.labels.bottom {
+  grid-area: bottom;
+  grid-template-columns: repeat(8, 1fr);
+  padding: 0 4px 4px;
+  background: var(--black);
+}
+
+.softkey {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: var(--key-green);
+  color: var(--white);
+  border: 3px solid var(--key-green);
+  overflow: hidden;
+  /* A label is as many lines as its text has, and no more. */
+  white-space: pre;
+  line-height: 1.25;
+}
+.softkey.selected {
+  border-color: var(--yellow);
+  outline: 1px solid var(--black);
+}
+.softkey.unavailable {
+  background: var(--grey);
+  border-color: var(--grey);
+}
+.softkey.blank {
+  visibility: hidden;
+}
+/* A label is a soft key too: one that has something to do
+   answers the finger on it. */
+.softkey.available:active,
+.softkey.selected:active {
+  filter: brightness(1.6);
+}
+/* Left labels read from the left edge, right labels from the right, top and
+   bottom labels are centred. */
+.left .softkey {
+  justify-content: flex-start;
+  text-align: left;
+}
+.right .softkey {
+  justify-content: flex-end;
+  text-align: right;
+}
+.bottom .softkey {
+  justify-content: center;
+  text-align: center;
+  padding: 0 2px;
+  font-size: 16px;
+}
+
+/* An image over another program's picture - a reticle, say. The program's
+   window is given what the bars leave of the screen, the row between them
+   from edge to edge, so the image is too: fitted into it whole and centred,
+   as a picture in a window is. */
+.overlay {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* A page of tiles: other programs' pictures side by side, each in a window
+   under this one. The page is black but for the tiles, which are holes in
+   it - so is what the window has round the display, on a screen that is not
+   4:3 - and whatever a window has outside its tile is not seen. Where the
+   tiles are is the frame's to say (tiles.rs in hmi-core, which keeps them
+   clear of where the text messages go, and gives them the room of whatever
+   F19 has hidden: the side columns too, which the HMI's own pages keep). */
+.tiles {
+  position: absolute;
+  inset: 0;
+  box-shadow: 0 0 0 2048px var(--black);
+}
+.tiles-mask {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: var(--black);
+  shape-rendering: crispEdges;
+}
+/* A tile's border lies on the edge of its picture, and the picture's name
+   in its bottom left corner: the Plan Position Indicator is at the top left
+   of the page. */
+.tile {
+  position: absolute;
+  border: 1px solid var(--grey);
+}
+.tile-label {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  padding: 0 8px;
+  background: var(--black);
+  border-top: 1px solid var(--grey);
+  border-right: 1px solid var(--grey);
+  font-size: 16px;
+  line-height: 22px;
+}
+
+/* An alarm's text message goes directly beneath the status information bar
+  , and a threat's somewhere else, so that the two can be read
+   at once: along the bottom of the page, above the common
+   function labels. Each is a strip between the label columns, over whatever
+   is there. To have them the other way up, exchange their "align-self". */
+.alarm,
+.threat {
+  grid-area: page;
+  position: relative;
+  z-index: 2;
+  padding: 4px 12px;
+  line-height: 22px;
+  font-weight: bold;
+  text-align: center;
+}
+.alarm {
+  align-self: start;
+}
+.threat {
+  align-self: end;
+}
+/* A message too long for the line takes a second rather than lose its end,
+   which is where it says what is wrong. */
+.alarm .text,
+.threat .text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* Colour says again what the text has said already - "W", "C" - and is not
+   the only thing that says it. */
+.alarm.warning {
+  background: var(--red);
+  color: var(--white);
+}
+.alarm.caution {
+  background: var(--amber);
+  color: var(--black);
+}
+/* A threat is a danger, and its message a warning's by another name: "T". */
+.threat {
+  background: var(--red);
+  color: var(--white);
+}
+/* An acknowledged warning's message stays, and a threat's
+   while the threat does, each with less to say for itself. */
+.alarm.warning.acknowledged,
+.threat.acknowledged {
+  background: var(--black);
+  box-shadow: inset 0 0 0 2px var(--red);
+  font-weight: normal;
+}
+
+/* The HMI's own pages keep clear of where an alarm's message goes and where
+   a threat's does, so that one arriving covers nothing of theirs. */
+.page {
+  grid-area: page;
+  position: relative;
+  /* What is on a page does not get to make the page bigger. */
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 44px 18px 40px 190px;
+}
+.page h1 {
+  margin: 4px 0 18px;
+  font-size: 22px;
+  font-weight: normal;
+}
+.page table {
+  border-collapse: collapse;
+}
+.page th {
+  padding: 6px 28px 6px 0;
+  font-weight: normal;
+  text-align: left;
+  color: rgb(190, 190, 190);
+}
+.page td {
+  padding: 6px 0;
+}
+
+/* The PPI sits top left of the display area by default, over
+   the page - its own or another program's - and under the messages. */
+.ppi {
+  grid-area: page;
+  align-self: start;
+  justify-self: start;
+  position: relative;
+  z-index: 1;
+  margin: 40px 0 0 10px;
+  width: 160px;
+  height: 160px;
+}
+.ppi-face {
+  fill: var(--black);
+  stroke: var(--white);
+  stroke-width: 2;
+}
+.ppi-mark {
+  stroke: var(--white);
+  stroke-width: 2.5;
+}
+.ppi-north {
+  fill: var(--white);
+  font-size: 22px;
+}
+.ppi-vehicle {
+  fill: none;
+  stroke: var(--white);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+/* A threat, the way it lies from the vehicle: red is for danger
+  , and the bar is at the edge, where nothing else is red. */
+.ppi-threat {
+  fill: var(--red);
+  stroke: var(--black);
+  stroke-width: 1;
+}
+.ppi-threat.picked {
+  stroke: var(--white);
+  stroke-width: 3;
+}
+
+/* The Alarms page and the Threats page,
+   which is laid out as it is: what there is in all, which
+   page of the table this is, and the table. */
+.page.menu {
+  padding: 44px 14px 40px;
+  font-size: 16px;
+}
+.menu header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.menu h1 {
+  margin: 4px 0 10px;
+}
+.menu-counts {
+  display: flex;
+  gap: 36px;
+  margin-bottom: 12px;
+}
+.menu .name {
+  color: rgb(190, 190, 190);
+  margin-right: 12px;
+}
+.menu-counts .count + .count {
+  margin-left: 12px;
+}
+.menu-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.menu-table th,
+.menu-table td {
+  padding: 4px 6px;
+  line-height: 20px;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.menu-table thead th {
+  color: rgb(190, 190, 190);
+  border-bottom: 1px solid var(--grey);
+}
+/* An alarm's text ends with what matters most - "Low", "High" - so one too
+   long for its line takes a second rather than lose its end. A page of the
+   table is as many rows as fit when they all do (ROWS_PER_PAGE in hmi-core). */
+.menu-table .text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+}
+/* As wide as the longest thing each can say, and the alarm has the rest. */
+.menu-table .time {
+  width: calc(7ch + 14px);
+}
+.menu-table .category {
+  width: calc(8ch + 14px);
+}
+.menu-table .acknowledged {
+  width: calc(3ch + 14px);
+}
+.menu-table .state {
+  width: calc(10ch + 14px);
+}
+.menu-table .bearing {
+  width: calc(11ch + 14px);
+}
+.menu-table .range,
+.menu-table .standing {
+  width: calc(7ch + 14px);
+}
+/* The picked row is marked as a selected soft key is. */
+.menu-table tr.selected td {
+  background: var(--key-green);
+  box-shadow:
+    inset 0 2px 0 var(--yellow),
+    inset 0 -2px 0 var(--yellow);
+}
+.menu-table tr.selected td:first-child {
+  box-shadow:
+    inset 2px 0 0 var(--yellow),
+    inset 0 2px 0 var(--yellow),
+    inset 0 -2px 0 var(--yellow);
+}
+.menu-table tr.selected td:last-child {
+  box-shadow:
+    inset -2px 0 0 var(--yellow),
+    inset 0 2px 0 var(--yellow),
+    inset 0 -2px 0 var(--yellow);
+}
+/* An alarm that is over, or silenced, is still in the table and plainly not
+   what the others are. So is a threat that has gone. */
+.menu-table tr.resolved td,
+.menu-table tr.overridden td,
+.menu-table tr.past td {
+  color: var(--grey);
+}
+.menu-table .none td {
+  color: rgb(190, 190, 190);
+}
+.warning .category,
+.count.warning {
+  color: var(--red);
+}
+.caution .category,
+.count.caution {
+  color: var(--amber);
+}
+.advisory .category,
+.count.advisory {
+  color: var(--yellow);
+}
+
+/* One alarm, or one threat, at length: a dialog over the table, which F13
+   or F20 puts away. */
+.menu-detail {
+  position: absolute;
+  left: 88px;
+  right: 88px;
+  top: 150px;
+  padding: 18px 22px 20px;
+  background: var(--black);
+  border: 2px solid var(--white);
+}
+.menu-detail h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+  font-weight: bold;
+  white-space: normal;
+}
+.menu-detail dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 20px;
+  margin: 0 0 14px;
+}
+.menu-detail dt {
+  color: rgb(190, 190, 190);
+}
+.menu-detail dd {
+  margin: 0;
+}
+.menu-detail p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* The Threats page as a table: the Plan Position Indicator is in its corner,
+   and what the page says of itself is beside it, in the indicator's height. */
+.threats-page .beside-ppi {
+  height: 164px;
+  margin-left: 172px;
+  overflow: hidden;
+}
+/* The sensors that look for threats, and how each is: by the
+   word, and by its colour too. */
+.sensors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  line-height: 20px;
+}
+.sensor .how {
+  font-weight: bold;
+}
+.sensor.ok .how {
+  color: var(--green);
+}
+.sensor.degraded .how {
+  color: var(--amber);
+}
+.sensor.failed .how {
+  color: var(--red);
+}
+.sensor.off .how,
+.sensor.none {
+  color: var(--grey);
+}
+/* Under the indicator, not over it. */
+.threats-page .menu-detail {
+  top: 216px;
+}
+
+/* The Threats page as a picture: the Plan Position Indicator at the size of
+   the page, which it has to itself. */
+.threat-plot {
+  display: block;
+  width: 580px;
+  height: 580px;
+  margin: 0 auto;
+  /* A threat at the edge has its type written beyond it. */
+  overflow: visible;
+}
+/* In a corner the indicator leaves empty. */
+.threats-page .elsewhere {
+  position: absolute;
+  left: 14px;
+  bottom: 44px;
+  color: rgb(190, 190, 190);
+}
+.plot-mark {
+  stroke: var(--white);
+  stroke-width: 1;
+}
+.plot-north {
+  fill: var(--white);
+  font-size: 7px;
+}
+.plot-ring {
+  fill: none;
+  stroke: var(--grey);
+  stroke-width: 0.5;
+}
+.plot-range {
+  fill: rgb(190, 190, 190);
+  font-size: 5px;
+}
+.plot-vehicle {
+  fill: none;
+  stroke: var(--white);
+  stroke-width: 5;
+  stroke-linejoin: round;
+}
+.plot-label {
+  fill: var(--white);
+  font-size: 5.4px;
+}
+.plot-pending {
+  fill: var(--red);
+}
+/* The picked threat is marked as the picked row of the table is. */
+/* What of a threat on the picture can be touched: the ground round its
+   symbol, as wide as the box that picks it out. */
+.plot-touch {
+  fill: none;
+  pointer-events: all;
+}
+.plot-pick {
+  fill: none;
+  stroke: var(--yellow);
+  stroke-width: 0.9;
+}
+/* One that has gone is still on the picture, until it is left off it or
+   cancelled, and plainly not what the others are. */
+.plot-threat.past {
+  opacity: 0.45;
+}
+.threats-page.plotted .menu-detail {
+  top: 150px;
+}

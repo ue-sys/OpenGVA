@@ -1,0 +1,4 @@
+# Everything built
+/dist/
+/target/
+/src-tauri/gen/

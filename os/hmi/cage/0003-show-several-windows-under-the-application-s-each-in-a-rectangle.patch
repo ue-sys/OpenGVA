@@ -1,0 +1,233 @@
+Show several windows under the application's, each in a rectangle
+
+With -u, one window of another client was shown under the application's
+at a time, in all that the application's window leaves clear. Now the
+application can have several shown at once, side by side: it gives each a
+rectangle of its own window, and the window is put there.
+
+The rectangle is given with the set_rectangle request of the
+wlr-foreign-toplevel-management protocol, which is the one by which a
+client says where in a surface of its own it represents a toplevel. From
+the application, that is taken as where the window is to be: it is moved
+there, told to be that size, and not drawn outside the rectangle, so that
+a window that has not yet drawn itself at its new size takes nothing from
+the one beside it. An empty rectangle takes the rectangle away, and the
+window again has all that is left clear.
+
+A window in a rectangle of its own is shown by the unset_minimized request,
+beside whatever else is showing, and hidden by set_minimized. A window
+without one is shown as before, in place of any other, and the activate
+request still shows a window in place of any other, whichever it is.
+
+The rectangle is taken to be one of the application's window whichever of
+the application's surfaces the request names, and from any other client
+the request is ignored. An application that speaks this protocol over a
+connection of its own, beside its toolkit's, cannot name the surface its
+toolkit draws on.
+
+This is what lets the OpenGVA HMI show several programs' pictures at once
+- the feeds of some of a vehicle's cameras - in tiles of one page.
+
+A view's scene tree is also forgotten when the view is unmapped, where it
+was left pointing at what had been destroyed: positioning a view looks at
+it.
+
+Upstream: not submitted
+
+diff -Naur a/cage.1.scd b/cage.1.scd
+--- a/cage.1.scd
++++ b/cage.1.scd
+@@ -46,6 +46,15 @@
+ 	request shows a window in place of any other, and whose minimize
+ 	request hides it.
+ 
++	The application can have several of them shown at once instead, side
++	by side. The protocol's set_rectangle request, from the application,
++	gives a window a rectangle of the application's window to itself in
++	place of all that is left clear: the window is put there, told to be
++	that size, and not drawn outside it. A window with a rectangle of its
++	own is shown by the unset_minimized request, beside any others that
++	are showing, and hidden by set_minimized; an empty rectangle takes its
++	rectangle away again.
++
+ *-v*
+ 	Show the version number and exit.
+ 
+diff -Naur a/server.h b/server.h
+--- a/server.h
++++ b/server.h
+@@ -29,7 +29,8 @@
+ 	/* With -u, the views of the application Cage was started for stay in
+ 	 * front and keep the keyboard, and other clients' views are shown
+ 	 * under them: one at a time, in the part of the screen that the
+-	 * application's window does not cover. */
++	 * application's window does not cover, or several, each in the
++	 * rectangle the application has given it (cg_view::place). */
+ 	bool others_under;
+ 	pid_t primary_client_pid;
+ 	struct wlr_box clear_box;
+diff -Naur a/view.c b/view.c
+--- a/view.c
++++ b/view.c
+@@ -79,23 +79,29 @@
+ 	return NULL;
+ }
+ 
+-/* Of the views shown under the application's, one is shown at a time: this
+- * one, or with NULL none. They are never given the keyboard, so this is
+- * also where such a view learns whether it is the one showing. */
++/* Show a view that is under the application's, or hide it. Such a view is
++ * never given the keyboard, so this is also where it learns whether it is
++ * showing. */
++static void
++view_set_shown(struct cg_view *view, bool shown)
++{
++	wlr_scene_node_set_enabled(&view->scene_tree->node, shown);
++	view_activate(view, shown);
++	if (view->foreign_toplevel) {
++		wlr_foreign_toplevel_handle_v1_set_minimized(view->foreign_toplevel, !shown);
++		wlr_foreign_toplevel_handle_v1_set_activated(view->foreign_toplevel, shown);
++	}
++}
++
++/* Of the views shown under the application's, show this one and no other,
++ * or with NULL none. */
+ static void
+ view_show_only(struct cg_server *server, struct cg_view *view)
+ {
+ 	struct cg_view *other;
+ 	wl_list_for_each (other, &server->views, link) {
+-		if (other->foremost) {
+-			continue;
+-		}
+-		bool shown = other == view;
+-		wlr_scene_node_set_enabled(&other->scene_tree->node, shown);
+-		view_activate(other, shown);
+-		if (other->foreign_toplevel) {
+-			wlr_foreign_toplevel_handle_v1_set_minimized(other->foreign_toplevel, !shown);
+-			wlr_foreign_toplevel_handle_v1_set_activated(other->foreign_toplevel, shown);
++		if (!other->foremost) {
++			view_set_shown(other, other == view);
+ 		}
+ 	}
+ }
+@@ -187,11 +193,47 @@
+ 	if (view->foremost || !view_get_foremost(view->server)) {
+ 		return;
+ 	}
+-	if (!event->minimized) {
++	bool shown = !event->minimized;
++	if (shown && wlr_box_empty(&view->place)) {
++		/* It has all that the application's window leaves clear, and
++		   is shown in place of any other. */
+ 		view_show_only(view->server, view);
+-	} else if (view->scene_tree->node.enabled) {
+-		view_show_only(view->server, NULL);
++	} else if (shown != view->scene_tree->node.enabled) {
++		/* In a rectangle of its own it is shown beside the others;
++		   and wherever it is, it is hidden by itself. */
++		view_set_shown(view, shown);
++	}
++}
++
++static void
++handle_foreign_toplevel_set_rectangle(struct wl_listener *listener, void *data)
++{
++	struct cg_view *view = wl_container_of(listener, view, foreign_toplevel_set_rectangle);
++	struct wlr_foreign_toplevel_handle_v1_set_rectangle_event *event = data;
++	struct cg_view *foremost = view_get_foremost(view->server);
++
++	/* Where a view under the application's goes is for the application
++	   to say, and nobody else. The rectangle is taken to be one of the
++	   application's window whichever of its surfaces the request names:
++	   an application that asks over a connection of its own, beside its
++	   toolkit's, has no other name for that window. */
++	if (view->foremost || !foremost ||
++	    !view_client_is_primary(view->server, wl_resource_get_client(event->surface->resource))) {
++		return;
++	}
++
++	/* An empty rectangle takes away the one it had. */
++	struct wlr_box place = {
++		.x = foremost->lx + event->x,
++		.y = foremost->ly + event->y,
++		.width = event->width,
++		.height = event->height,
++	};
++	if (wlr_box_equal(&place, &view->place)) {
++		return;
+ 	}
++	view->place = wlr_box_empty(&place) ? (struct wlr_box){0} : place;
++	view_position(view);
+ }
+ 
+ static void
+@@ -206,6 +248,8 @@
+ 	wl_signal_add(&view->foreign_toplevel->events.request_activate, &view->foreign_toplevel_request_activate);
+ 	view->foreign_toplevel_request_minimize.notify = handle_foreign_toplevel_request_minimize;
+ 	wl_signal_add(&view->foreign_toplevel->events.request_minimize, &view->foreign_toplevel_request_minimize);
++	view->foreign_toplevel_set_rectangle.notify = handle_foreign_toplevel_set_rectangle;
++	wl_signal_add(&view->foreign_toplevel->events.set_rectangle, &view->foreign_toplevel_set_rectangle);
+ 	view_update_foreign_toplevel(view);
+ }
+ 
+@@ -251,13 +295,24 @@
+ 	struct wlr_box layout_box;
+ 	wlr_output_layout_get_box(view->server->output_layout, NULL, &layout_box);
+ 
+-	if (view->server->others_under && !view->foremost && !wlr_box_empty(&view->server->clear_box)) {
++	bool under = view->server->others_under && !view->foremost;
++	bool placed = under && !wlr_box_empty(&view->place);
++	if (placed) {
++		view_maximize(view, &view->place);
++	} else if (under && !wlr_box_empty(&view->server->clear_box)) {
+ 		view_maximize(view, &view->server->clear_box);
+ 	} else if (view_is_primary(view) || view_extends_output_layout(view, &layout_box)) {
+ 		view_maximize(view, &layout_box);
+ 	} else {
+ 		view_center(view, &layout_box);
+ 	}
++
++	/* A view in a rectangle of its own shows nothing outside it, whatever
++	   size it has drawn itself: there may be another beside it. */
++	if (view->scene_tree) {
++		struct wlr_box clip = {.width = view->place.width, .height = view->place.height};
++		wlr_scene_subsurface_tree_set_clip(&view->scene_tree->node, placed ? &clip : NULL);
++	}
+ }
+ 
+ void
+@@ -277,11 +332,13 @@
+ 	if (view->foreign_toplevel) {
+ 		wl_list_remove(&view->foreign_toplevel_request_activate.link);
+ 		wl_list_remove(&view->foreign_toplevel_request_minimize.link);
++		wl_list_remove(&view->foreign_toplevel_set_rectangle.link);
+ 		wlr_foreign_toplevel_handle_v1_destroy(view->foreign_toplevel);
+ 		view->foreign_toplevel = NULL;
+ 	}
+ 
+ 	wlr_scene_node_destroy(&view->scene_tree->node);
++	view->scene_tree = NULL;
+ 
+ 	view->wlr_surface->data = NULL;
+ 	view->wlr_surface = NULL;
+diff -Naur a/view.h b/view.h
+--- a/view.h
++++ b/view.h
+@@ -35,10 +35,16 @@
+ 	 * cg_server::others_under. */
+ 	bool foremost;
+ 
++	/* The rectangle of the layout that a view shown under the
++	 * application's has to itself, if the application has given it one:
++	 * empty if not. */
++	struct wlr_box place;
++
+ 	/* The view as other clients are told of it, and can ask for it. */
+ 	struct wlr_foreign_toplevel_handle_v1 *foreign_toplevel;
+ 	struct wl_listener foreign_toplevel_request_activate;
+ 	struct wl_listener foreign_toplevel_request_minimize;
++	struct wl_listener foreign_toplevel_set_rectangle;
+ 
+ 	enum cg_view_type type;
+ 	const struct cg_view_impl *impl;

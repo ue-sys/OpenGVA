@@ -1,0 +1,17 @@
+[package]
+name = "opengva-web-viewer"
+description = "OpenGVA web viewer: one web page in a window with nothing round it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The window, and the system's TLS, which GTK's own libraries carry: the
+# same GTK 3 the HMI's window is made with.
+gtk = "0.18"
+web-view = { path = "../crates/web-view" }
+# The page: WebKitGTK, which the image has for the HMI. Used as it is, with
+# nothing between: what a view needs of it - above all its word when a server
+# asks who is calling - is WebKit's own to give.
+webkit2gtk = { version = "2.0", features = ["v2_40"] }

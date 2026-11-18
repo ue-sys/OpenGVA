@@ -1,0 +1,320 @@
+Lend the keyboard to the window the application types into
+
+With -u the application keeps the keyboard, and a window of another
+client that is shown under it gets the pointer and touches and nothing
+else. That is as it should be for the keys of the machine's keyboards. It
+leaves an application that has an on-screen keyboard of its own with no
+way to type into such a window with it: the virtual-keyboard protocol,
+which Cage offers, sends keys to whoever has the keyboard focus, and that
+is the application itself.
+
+Now the application can lend the focus. For as long as it has a virtual
+keyboard of its own - one made by the client Cage was started for - the
+window it has on show under its own has the keyboard focus, and what that
+virtual keyboard types goes to it. If no window is on show, or more than
+one is, side by side, there is nobody to say a key is for: the focus
+stays with the application, and what its virtual keyboard types is
+dropped.
+
+Nothing but that virtual keyboard reaches the window. While the focus is
+lent, what every other keyboard does - the machine's own, and any other
+client's virtual one - is passed to no client; Cage's own key bindings
+still answer. The window is told of no key that was down when it was
+given the focus, and a press on the application's window, where the keys
+of an on-screen keyboard are, does not take the focus back.
+
+The focus comes back to the application when it destroys its virtual
+keyboard, and when the window is hidden, replaced by another or closed;
+a window that takes the place of another while the virtual keyboard is
+still there is lent the focus in its turn. The group Cage makes for the
+application's virtual keyboard is freed with that keyboard, where the
+group of any virtual keyboard is left behind: an application that makes
+one each time its on-screen keyboard comes up would leave one behind each
+time.
+
+This is what lets the crew type into another program's page - a web
+page, a map's search box - with the OpenGVA HMI's on-screen keyboard,
+from the bezel or by touch.
+
+Upstream: not submitted
+
+diff -Naur a/cage.1.scd b/cage.1.scd
+--- a/cage.1.scd
++++ b/cage.1.scd
+@@ -55,6 +55,15 @@
+ 	are showing, and hidden by set_minimized; an empty rectangle takes its
+ 	rectangle away again.
+ 
++	The application can type into the window it has on show. For as long
++	as it has a virtual keyboard of its own (the virtual-keyboard
++	protocol), the keyboard focus is lent to that window, if one is on
++	show and no more than one, and what the virtual keyboard types goes
++	to it. Nothing else does: while the focus is lent, the keys of every
++	other keyboard go to nobody. When the application destroys its
++	virtual keyboard, or the window is hidden or closed, the application
++	has the keyboard again.
++
+ *-v*
+ 	Show the version number and exit.
+ 
+diff -Naur a/seat.c b/seat.c
+--- a/seat.c
++++ b/seat.c
+@@ -244,11 +244,31 @@
+ 	update_capabilities(seat);
+ }
+ 
++/* Whether what a keyboard does is to be passed on to the client that has
++ * the keyboard focus. What the application's own virtual keyboard types is
++ * for the view it has on show, which has the focus for that, and for nobody
++ * if there is none. What any other keyboard types is the application's, as
++ * it always was, and not for a view that has been lent the focus for what
++ * the application types into it. */
++static bool
++keyboard_passes(struct wlr_keyboard *keyboard, struct cg_seat *seat)
++{
++	struct wlr_keyboard_group *wlr_group = wlr_keyboard_group_from_wlr_keyboard(keyboard);
++	struct cg_keyboard_group *group = wlr_group ? wlr_group->data : NULL;
++	if (group && group->lends) {
++		seat_lend_keyboard(seat);
++		return seat->lent_to != NULL;
++	}
++	return seat->lent_to == NULL;
++}
++
+ static void
+ handle_modifier_event(struct wlr_keyboard *keyboard, struct cg_seat *seat)
+ {
+-	wlr_seat_set_keyboard(seat->seat, keyboard);
+-	wlr_seat_keyboard_notify_modifiers(seat->seat, &keyboard->modifiers);
++	if (keyboard_passes(keyboard, seat)) {
++		wlr_seat_set_keyboard(seat->seat, keyboard);
++		wlr_seat_keyboard_notify_modifiers(seat->seat, &keyboard->modifiers);
++	}
+ 
+ 	wlr_idle_notifier_v1_notify_activity(seat->server->idle, seat->seat);
+ }
+@@ -298,7 +318,7 @@
+ 		}
+ 	}
+ 
+-	if (!handled) {
++	if (!handled && keyboard_passes(keyboard, seat)) {
+ 		/* Otherwise, we pass it along to the client. */
+ 		wlr_seat_set_keyboard(seat->seat, keyboard);
+ 		wlr_seat_keyboard_notify_key(seat->seat, event->time_msec, event->keycode, event->state);
+@@ -417,6 +437,20 @@
+ 	wlr_seat_set_keyboard(seat->seat, keyboard);
+ }
+ 
++/* The application's virtual keyboard has gone: so has its group, which was
++ * for that keyboard alone, and the application has the keyboard focus again
++ * unless it has another. */
++static void
++handle_lending_keyboard_destroy(struct wl_listener *listener, void *data)
++{
++	struct cg_keyboard_group *group = wl_container_of(listener, group, lending_destroy);
++	struct cg_seat *seat = group->seat;
++
++	wl_list_remove(&group->lending_destroy.link);
++	keyboard_group_destroy(group);
++	seat_lend_keyboard(seat);
++}
++
+ static void
+ handle_virtual_keyboard(struct wl_listener *listener, void *data)
+ {
+@@ -430,6 +464,17 @@
+ 
+ 	handle_new_keyboard(seat, wlr_keyboard, true);
+ 	update_capabilities(seat);
++
++	/* A virtual keyboard of the application's own is one it types into
++	   another client's view with: the view it has on show has the
++	   keyboard focus for as long as there is such a keyboard. */
++	struct cg_keyboard_group *group = wlr_keyboard->group ? wlr_keyboard->group->data : NULL;
++	if (group && view_client_is_primary(server, wl_resource_get_client(keyboard->resource))) {
++		group->lends = true;
++		group->lending_destroy.notify = handle_lending_keyboard_destroy;
++		wl_signal_add(&wlr_keyboard->base.events.destroy, &group->lending_destroy);
++		seat_lend_keyboard(seat);
++	}
+ }
+ 
+ static void
+@@ -935,8 +980,11 @@
+ 	}
+ 
+ 	/* A view shown under the application's gets the pointer and touches,
+-	   not the keyboard. */
+-	if (!view->foremost && view_get_foremost(server)) {
++	   not the keyboard - unless the application lends it, which is not
++	   done here. And while it is lent it stays lent: a press on the
++	   application's own view, where the keys of an on-screen keyboard
++	   are, does not take it back. */
++	if (seat->lent_to || (!view->foremost && view_get_foremost(server))) {
+ 		return;
+ 	}
+ 
+@@ -979,6 +1027,56 @@
+ 	process_cursor_motion(seat, -1, 0, 0, 0, 0);
+ }
+ 
++/* Give the keyboard focus to whom it belongs. While the application has a
++ * virtual keyboard of its own, that is the view under the application's
++ * that it has on show, if there is one and no more: several are shown side
++ * by side, and then there is no saying which of them a key is for. Otherwise
++ * it is the application's. The view is told of no key that is down: a key
++ * held on another keyboard is none of its business. */
++void
++seat_lend_keyboard(struct cg_seat *seat)
++{
++	struct cg_view *to = NULL;
++	struct cg_keyboard_group *group;
++	wl_list_for_each (group, &seat->keyboard_groups, link) {
++		if (group->lends) {
++			to = view_get_only_shown(seat->server);
++			break;
++		}
++	}
++	if (to == seat->lent_to) {
++		return;
++	}
++
++	seat->lent_to = to;
++	if (!to) {
++		to = view_get_foremost(seat->server);
++	}
++	if (to && to->wlr_surface) {
++		wlr_seat_keyboard_notify_enter(seat->seat, to->wlr_surface, NULL, 0, NULL);
++	} else {
++		wlr_seat_keyboard_notify_clear_focus(seat->seat);
++	}
++}
++
++/* A view that is going from the screen gives back the keyboard focus, if it
++ * had been lent it. */
++void
++seat_take_back_keyboard(struct cg_seat *seat, struct cg_view *from)
++{
++	if (seat->lent_to != from) {
++		return;
++	}
++
++	seat->lent_to = NULL;
++	struct cg_view *foremost = view_get_foremost(seat->server);
++	if (foremost && foremost->wlr_surface) {
++		wlr_seat_keyboard_notify_enter(seat->seat, foremost->wlr_surface, NULL, 0, NULL);
++	} else {
++		wlr_seat_keyboard_notify_clear_focus(seat->seat);
++	}
++}
++
+ void
+ seat_center_cursor(struct cg_seat *seat)
+ {
+diff -Naur a/seat.h b/seat.h
+--- a/seat.h
++++ b/seat.h
+@@ -21,6 +21,11 @@
+ 
+ 	struct wl_list keyboards;
+ 	struct wl_list keyboard_groups;
++
++	/* The view under the application's that has been lent the keyboard,
++	 * while the application has a virtual keyboard to type into it with:
++	 * see seat_lend_keyboard(). */
++	struct cg_view *lent_to;
+ 	struct wl_list pointers;
+ 	struct wl_list touch;
+ 	struct wl_listener new_input;
+@@ -57,6 +62,12 @@
+ 	struct wl_listener modifiers;
+ 	struct wl_list link; // cg_seat::keyboard_groups
+ 	bool is_virtual;
++
++	/* Whether this is a virtual keyboard of the application's own, which
++	 * it types into another client's view with; and for one that is, when
++	 * that keyboard goes. */
++	bool lends;
++	struct wl_listener lending_destroy;
+ };
+ 
+ struct cg_pointer {
+@@ -91,6 +102,8 @@
+ void seat_destroy(struct cg_seat *seat);
+ struct cg_view *seat_get_focus(struct cg_seat *seat);
+ void seat_set_focus(struct cg_seat *seat, struct cg_view *view);
++void seat_lend_keyboard(struct cg_seat *seat);
++void seat_take_back_keyboard(struct cg_seat *seat, struct cg_view *from);
+ void seat_center_cursor(struct cg_seat *seat);
+ 
+ #endif
+diff -Naur a/view.c b/view.c
+--- a/view.c
++++ b/view.c
+@@ -79,18 +79,43 @@
+ 	return NULL;
+ }
+ 
++/* The view under the application's that is on show, if there is one and no
++ * more than one. */
++struct cg_view *
++view_get_only_shown(struct cg_server *server)
++{
++	struct cg_view *shown = NULL;
++	struct cg_view *view;
++	wl_list_for_each (view, &server->views, link) {
++		if (view->foremost || !view->wlr_surface || !view->scene_tree || !view->scene_tree->node.enabled) {
++			continue;
++		}
++		if (shown) {
++			return NULL;
++		}
++		shown = view;
++	}
++	return view_get_foremost(server) ? shown : NULL;
++}
++
+ /* Show a view that is under the application's, or hide it. Such a view is
+- * never given the keyboard, so this is also where it learns whether it is
+- * showing. */
++ * given the keyboard only while the application lends it, so this is also
++ * where it learns whether it is showing - and where the keyboard goes to
++ * the view the application now has on show, if it is lending it, and comes
++ * back from one it has hidden. */
+ static void
+ view_set_shown(struct cg_view *view, bool shown)
+ {
++	if (!shown) {
++		seat_take_back_keyboard(view->server->seat, view);
++	}
+ 	wlr_scene_node_set_enabled(&view->scene_tree->node, shown);
+ 	view_activate(view, shown);
+ 	if (view->foreign_toplevel) {
+ 		wlr_foreign_toplevel_handle_v1_set_minimized(view->foreign_toplevel, !shown);
+ 		wlr_foreign_toplevel_handle_v1_set_activated(view->foreign_toplevel, shown);
+ 	}
++	seat_lend_keyboard(view->server->seat);
+ }
+ 
+ /* Of the views shown under the application's, show this one and no other,
+@@ -327,6 +352,7 @@
+ void
+ view_unmap(struct cg_view *view)
+ {
++	seat_take_back_keyboard(view->server->seat, view);
+ 	wl_list_remove(&view->link);
+ 
+ 	if (view->foreign_toplevel) {
+diff -Naur a/view.h b/view.h
+--- a/view.h
++++ b/view.h
+@@ -67,6 +67,7 @@
+ void view_activate(struct cg_view *view, bool activate);
+ bool view_client_is_primary(struct cg_server *server, struct wl_client *client);
+ struct cg_view *view_get_foremost(struct cg_server *server);
++struct cg_view *view_get_only_shown(struct cg_server *server);
+ void view_update_clear_box(struct cg_view *view);
+ void view_update_foreign_toplevel(struct cg_view *view);
+ void view_position(struct cg_view *view);

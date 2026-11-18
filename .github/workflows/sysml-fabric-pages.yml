@@ -1,0 +1,33 @@
+# The design's documentation: sysml/ published to GitHub Pages by SysML
+# Fabric - an interactive site of every view, an SVG and a PNG of each, and
+# the model as a .kpar (the run's artifact).
+#
+# Once, before the first run: Settings -> Pages -> Build and deployment ->
+# Source: GitHub Actions.
+name: SysML design
+on:
+  push:
+    branches: [main]
+    paths: ['sysml/**', '.github/workflows/sysml-fabric-pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  pages:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ue-sys/sysml-fabric-pages@v1
+        with:
+          folder: sysml
+          title: OpenGVA
+      - id: deploy
+        uses: actions/deploy-pages@v5

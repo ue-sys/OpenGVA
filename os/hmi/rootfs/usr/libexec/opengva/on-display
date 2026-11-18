@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# Run a program on the HMI's display:
+#
+#   on-display PROGRAM [ARGUMENT...]
+#
+# It is what the service of a program whose window the HMI shows runs. Which
+# functional area shows which program's window is the HMI's configuration,
+# /etc/opengva/gva-fa.d; that the program is started at all, and again if it
+# ends, is its service's - a unit of its own, bound to the display's:
+#
+#   [Unit]
+#   BindsTo=opengva-hmi.service
+#   After=opengva-hmi.service
+#   [Service]
+#   User=hmi
+#   ExecStart=/usr/libexec/opengva/on-display /usr/bin/my-program
+#   Restart=always
+#   RestartSec=1
+#   [Install]
+#   WantedBy=opengva-hmi.service
+#
+# The program is not started until the HMI has painted its first frame: what
+# it costs to start is not to delay that. It finds the display where the
+# HMI's compositor put it, and it takes this script's place: what its
+# service is asked to stop, is it.
+
+[ $# -gt 0 ] || { echo "usage: $0 PROGRAM [ARGUMENT...]" >&2; exit 2; }
+
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export WAYLAND_DISPLAY=wayland-0
+export LANG=C.UTF-8
+export GDK_BACKEND=wayland
+export NO_AT_BRIDGE=1
+# A GTK program says when a field of text has the focus in its window, which
+# is what brings the HMI's on-screen keyboard up by itself: by the toolkit's
+# Wayland input method, which it uses only where it is told to.
+export GTK_IM_MODULE=wayland
+
+# The HMI makes this file when its first frame is on the screen, and the
+# display's script takes it away before each start of the display.
+until [ -e "$XDG_RUNTIME_DIR/opengva-hmi.ready" ]; do
+	sleep 0.1
+done
+
+exec "$@"

@@ -1,0 +1,75 @@
+# What an image is built with on request (HARDENED=1), after everything
+# else, when it is not for development: the DISA STIG, and nobody becomes
+# root by asking.
+#
+# The images built without this are development images, and stay so: root
+# logs in on the serial port with no password (os/base).
+ARG BASE
+FROM $BASE
+
+# The DISA STIG for RHEL 10, as Rocky's scap-security-guide has it, applied
+# by oscap-im: what it remediates, and the packages its rules want. The
+# profile is stig_gui, the STIG for a machine with a screen: "stig" is the
+# same but for three rules, one of which boots to multi-user.target, where
+# the HMI (graphical.target) never starts. What a rule would do to the
+# running machine (sysctl -w, systemctl start, grubby) it reports as an
+# error here; what it writes - sysctl.d, kargs.d, enabled units - is what
+# the image boots with.
+RUN dnf -y install openscap-utils scap-security-guide \
+	&& oscap-im --profile stig_gui /usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml \
+	&& dnf -y remove openscap-utils scap-security-guide && dnf clean all
+
+# The STIG makes /etc/systemd/system.conf of its Ctrl-Alt-Del setting alone,
+# with no [Manager] section, so systemd ignores it: the section is put in.
+RUN printf '[Manager]\nCtrlAltDelBurstAction=none\n' > /etc/systemd/system.conf
+
+# USBGuard: the STIG's policy is of the USB devices of whatever machine
+# built the image. This one is of kinds of device: hubs, and keyboards,
+# touch screens and other input devices (HID). Anything else - storage,
+# network, cameras - is blocked unless a site's policy says otherwise.
+# ponytail: any HID is allowed, so a USB stick that says it is a keyboard
+# gets in; pin vendor:product ids here once a vehicle's devices are known.
+RUN printf '%s\n' \
+	'allow with-interface equals { 09:*:* }' \
+	'allow with-interface equals { 03:*:* }' \
+	> /etc/usbguard/rules.conf && chmod 0600 /etc/usbguard/rules.conf
+
+# Root has no password that would be the right one; nothing waits on the
+# serial port for anyone's, and nothing is printed there; and nothing is
+# setuid or setgid, so a program that has been got at has nothing to ask to
+# be made root by. What changes user on this image is systemd, which is root
+# already.
+RUN usermod -p '!' root \
+	&& sed -i '/ttyS0/d' /usr/lib/bootc/kargs.d/10-opengva.toml \
+	&& systemctl mask serial-getty@ttyS0.service opengva-markers.service \
+	&& find /usr -xdev -type f -perm /6000 -exec chmod ug-s {} +
+
+# fapolicyd runs only what came from an RPM, as the RPM has it: trusted by
+# the RPM database alone, and only while the file's SHA-256 is still the
+# one the RPM gave it. Every part of OpenGVA, and of the layers on it, is
+# an RPM (os/rpm), and the build stops here if something that could run is
+# not: it would be refused on the crew station. Not counted: the boot
+# loader's files for the firmware (bootupd), and what the kernel itself
+# loads. What Rocky's bootc image has that no RPM does is its tool for
+# building images, which is no use on a crew station, and goes.
+#
+# On top of the rules fapolicyd comes with, a shell script runs only if it
+# is trusted too, as a Python or Perl one does; and the exceptions for
+# dracut and dnf, which never run on a crew station, are taken out. bootc
+# reads the next image while it is still to be trusted, so it may.
+RUN sed -i -e 's/^trust = .*/trust = rpmdb/' -e 's/^integrity = .*/integrity = sha256/' \
+		-e 's/^rpm_sha256_only = .*/rpm_sha256_only = 1/' /etc/fapolicyd/fapolicyd.conf \
+	&& cd /etc/fapolicyd/rules.d && rm 20-dracut.rules \
+	&& printf '%s\n' 'allow perm=open exe=/usr/bin/bootc trust=1 : all' > 21-updaters.rules \
+	&& printf '%s\n' 'allow perm=any all : ftype=text/x-shellscript trust=1' \
+		'deny_audit perm=any all : ftype=text/x-shellscript' > 72-shell.rules \
+	&& rm -rf /etc/fapolicyd/trust.d/* \
+	&& rm -r /usr/libexec/bootc-base-imagectl /usr/share/doc/bootc-base-imagectl \
+	&& rpm -qal | xargs -d '\n' realpath -m -- | sort -u > /tmp/rpm \
+	&& find /usr /etc -xdev \( -path /usr/lib/bootupd -o -path /usr/lib/modules -o -path /etc/alternatives-admindir \) -prune \
+		-o -type f \( -perm /111 -o -name '*.so' -o -name '*.so.*' \) -print | sort \
+		| comm -23 - /tmp/rpm > /tmp/not-rpm \
+	&& rm /tmp/rpm \
+	&& if [ -s /tmp/not-rpm ]; then \
+		echo 'Not from an RPM, so fapolicyd would not run them:' >&2; cat /tmp/not-rpm >&2; exit 1; fi \
+	&& rm /tmp/not-rpm

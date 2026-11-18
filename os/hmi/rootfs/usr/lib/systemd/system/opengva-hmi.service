@@ -1,0 +1,62 @@
+# The display, and the HMI on it.
+#
+# A display with nothing on it is the worst failure for an HMI: whenever
+# this ends, and however, it is started again.
+#
+# The services of other programs whose windows the HMI shows are bound to
+# this one (on-display says how): they stop when it does, start again with
+# it, and wait themselves for its first frame, so that none of them delays
+# that frame.
+
+[Unit]
+Description=OpenGVA HMI: the display, and the HMI on it
+# The display is tty1's, and nobody logs in there.
+Conflicts=getty@tty1.service
+After=getty@tty1.service systemd-user-sessions.service
+
+[Service]
+# As the unprivileged "hmi" user, in a logind session on tty1: logind lends
+# the session the display and the input devices (/etc/pam.d/opengva-display).
+User=hmi
+# The bezel's buttons are read from the input devices, which are the input
+# group's (app/crates/bezel-input). Given here, not in /etc/group: the system's
+# groups are in /usr/lib/group, which nothing adds members to.
+SupplementaryGroups=input
+PAMName=opengva-display
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+
+# GTK wants a UTF-8 locale; Wayland only - there is no X server here.
+Environment=LANG=C.UTF-8 GDK_BACKEND=wayland
+# There is no D-Bus session: nothing here needs one, and with one present
+# WebKit starts the accessibility bus and its registry.
+Environment=NO_AT_BRIDGE=1
+# The compositor does not wait for input devices: a crew station may have
+# none but its touch screen, and that one late.
+Environment=WLR_LIBINPUT_NO_DEVICES=1
+# The pointer, where there is a mouse to move one, is drawn with the rest of
+# the screen and not left to the display hardware, whose stand-in in a
+# virtual machine draws it upside down.
+Environment=WLR_NO_HARDWARE_CURSORS=1
+# What the display shows from the moment cage takes it until the HMI has
+# drawn: the logo, on grey (os/hmi/cage).
+Environment=CAGE_SPLASH=/usr/share/opengva/splash.png
+# Where what the vehicle has to say may come from: the feed. A socket that
+# whatever knows the vehicle listens on, or the port by which a virtual
+# machine's host stands in for it (61-opengva-feed.rules); the HMI uses
+# whichever is there, and does without while neither is.
+Environment=OPENGVA_FEED=/run/opengva/feed:/dev/virtio-ports/org.opengva.feed
+
+ExecStart=/usr/libexec/opengva/display
+Restart=always
+# Not at once: a display that cannot start is not started in a frenzy.
+RestartSec=2
+TimeoutStopSec=10
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,19 @@
+#!/bin/sh
+#
+# greetd's greeter on an OpenGVA crew station: what greetd starts, as the
+# HMI's user, to ask on its socket who is logging in. Here the HMI asks, and
+# was running before greetd was; this says where the socket is - greetd puts
+# that in GREETD_SOCK, and names the socket afresh each time it starts - and
+# then waits, for as long as greetd wants a greeter to be there.
+#
+# When the display is started again, the verifier is too
+# (opengva-verifier.service), and this with it, to say where the new socket
+# is.
+
+WHERE=/run/user/$(id -u)/opengva-verifier
+
+# Written whole, and for the HMI's user only.
+umask 077
+echo "$GREETD_SOCK" > "$WHERE.new" && mv "$WHERE.new" "$WHERE"
+
+exec sleep infinity

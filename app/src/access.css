@@ -1,0 +1,116 @@
+/* A PIN page (app/crates/hmi-access), at the display's reference size. The
+   colours are hmi.css's, and the
+   pad's keys are drawn as entry.css draws any key; selectors here are a
+   class longer than hmi.css's, so that they hold whichever is read first. */
+
+/* The page keeps clear of where an alarm's text message goes and where a
+   threat's does, as the HMI's other pages do: neither waits on a PIN. What
+   is asked is at the top and the pad has what is under it - which is more
+   when F19 has hidden the labels. */
+.page.pin-page {
+  display: flex;
+  flex-direction: column;
+  padding: 44px 8px 40px;
+}
+
+/* What is asked leaves the page's top left corner to the Plan Position
+   Indicator, as a form does. */
+.pin-page .asked {
+  flex: none;
+  margin: 0 6px 0 182px;
+}
+.pin-page header {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+.pin-page .asked h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 4px 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* How the page stands, in words. That a PIN was refused, could
+   not be checked or must wait is a caution, and has the colour of one. */
+.pin-page .standing.refused,
+.pin-page .standing.waiting,
+.pin-page .standing.unchecked {
+  color: var(--amber);
+}
+
+.pin-page .whose {
+  line-height: 26px;
+  color: rgb(190, 190, 190);
+}
+.pin-page .whose .account {
+  color: var(--white);
+}
+/* Where several accounts would do, each is a row to touch - 15 mm high on
+   a 12.1 inch display - and the one chosen is marked as a
+   selected soft key is. */
+.pin-page .accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.pin-page .accounts .account {
+  display: grid;
+  place-items: center;
+  min-width: 132px;
+  height: 62px;
+  padding: 0 12px;
+  background: var(--key-green);
+  border: 3px solid var(--key-green);
+  touch-action: none;
+}
+.pin-page .accounts .account.chosen {
+  border-color: var(--yellow);
+  outline: 1px solid var(--black);
+}
+
+/* The box: black on white, as a form's is, and as long as the
+   longest PIN. Under it, what the verifier said of the last one: a line
+   that has its room whether or not there is anything on it, so that the pad
+   does not move when there is. */
+.pin-page .box {
+  display: block;
+  width: calc(var(--most) * 1ch + 28px);
+  height: 40px;
+  margin-top: 6px;
+  padding: 0 10px 0 12px;
+  background: var(--white);
+  color: var(--black);
+  font-size: 20px;
+  line-height: 40px;
+  white-space: pre;
+  overflow: hidden;
+}
+.pin-page .said {
+  display: block;
+  height: 22px;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  line-height: 22px;
+  color: rgb(190, 190, 190);
+}
+
+/* The pad: the form's phone pad, in what is left of the page. It has the
+   height and not the width: its keys are as large as are still keys. */
+.pin-page .keyboard {
+  flex: 1;
+  min-height: 0;
+  align-self: center;
+  width: 396px;
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(var(--columns), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
+  gap: 6px;
+}

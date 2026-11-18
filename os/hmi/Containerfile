@@ -1,0 +1,158 @@
+# The crew station's image: the HMI, and what it draws with, on the base
+# (os/base). Built from the top of the tree (the Makefile), for the HMI's
+# source (app), the viewers' (app/viewers) and the logo (assets).
+#
+# Each part is compiled in a stage of its own and made an RPM there
+# (opengva-rpm, os/rpm), and the image installs the RPMs: what runs on a
+# crew station is what an RPM put there, which is what os/hardened's
+# fapolicyd trusts. VERSION and RELEASE are the RPMs' (the Makefile).
+ARG BASE
+ARG RPM
+
+# --- What is compiled, in stages of their own, so that no compiler is in
+# the image. Each stage puts what it makes in /out, as it goes on the image,
+# and then makes an RPM of that in /rpms. On the Rocky the base is (os/rpm
+# is that and rpmbuild), and not on the base: what is compiled does not
+# change when the base does.
+FROM $RPM AS build
+RUN dnf -y install epel-release \
+	&& dnf -y --enablerepo=crb --setopt=install_weak_deps=False install \
+		gcc meson ninja-build patch tar xz \
+		wayland-devel wayland-protocols-devel libxkbcommon-devel libinput-devel \
+		libdrm-devel mesa-libgbm-devel mesa-libEGL-devel pixman-devel \
+		libseat-devel libdisplay-info-devel hwdata-devel systemd-devel libpng-devel \
+		glib2-devel openssl-devel pam-devel \
+		cargo rust nodejs nodejs-npm gtk3-devel webkit2gtk4.1-devel librsvg2-tools \
+	&& dnf clean all
+# One target directory for every Rust build here: the HMI's crates and the
+# VNC viewer's are mostly the same, at the same versions. Caches are kept
+# between builds (the RUN lines' cache mounts), and not under /root, which
+# is a link into /var on a bootc image.
+ENV CARGO_TARGET_DIR=/target CARGO_HOME=/cargo npm_config_cache=/npm
+
+# Cage, the compositor: cage 0.2.1 with our patches (os/hmi/cage), and the
+# wlroots it is made for built into it. Rocky has neither version.
+FROM build AS cage
+ADD --checksum=sha256:acab0c83175164a788d7b9f89338cbdebdc4f7197aff6fdc267c32f7181234a9 \
+	https://github.com/cage-kiosk/cage/archive/refs/tags/v0.2.1.tar.gz /src/cage.tar.gz
+# Checked by Buildroot against emersion's signature.
+ADD --checksum=sha256:09a0a8d60104c8b0772fee4f60ba76a89aed7e59dff7659d00960fba06bdf267 \
+	https://gitlab.freedesktop.org/wlroots/wlroots/-/releases/0.19.2/downloads/wlroots-0.19.2.tar.gz /src/wlroots.tar.gz
+COPY os/hmi/cage /src/patches
+RUN cd /src && tar xf cage.tar.gz && tar xf wlroots.tar.gz \
+	&& mkdir -p cage-0.2.1/subprojects && mv wlroots-0.19.2 cage-0.2.1/subprojects/wlroots \
+	&& cd cage-0.2.1 && for p in /src/patches/*.patch; do patch -p1 < "$p" || exit; done \
+	&& meson setup build --prefix=/usr --buildtype=release -Dman-pages=disabled \
+		--force-fallback-for=wlroots-0.19 -Dwlroots:default_library=static \
+		-Dwlroots:examples=false -Dwlroots:xwayland=disabled -Dwlroots:xcb-errors=disabled \
+		-Dwlroots:backends=drm,libinput -Dwlroots:renderers=gles2 -Dwlroots:session=enabled \
+		-Dwlroots:libliftoff=disabled -Dwlroots:color-management=disabled \
+	&& meson compile -C build \
+	&& DESTDIR=/out meson install -C build --skip-subprojects
+# Declared here, after the compiling, so that a new release only packs again.
+ARG VERSION
+ARG RELEASE
+RUN opengva-rpm opengva-cage MIT 'Cage, the kiosk compositor, with OpenGVA patches and wlroots built in' /out
+
+# greetd, the verifier (opengva-verifier.service). Only the daemon: the HMI
+# asks, not greetd's own login prompt.
+FROM build AS greetd
+ADD --checksum=sha256:ee5cb70e0add4ca9c9fe57e47581ab0002d44c07743fb5492469f3b570db640b \
+	https://github.com/kennylevinsen/greetd/archive/refs/tags/0.10.3.tar.gz /src/greetd.tar.gz
+RUN --mount=type=cache,target=/cargo/registry --mount=type=cache,target=/target \
+	cd /src && tar xf greetd.tar.gz && cd greetd-0.10.3 \
+	&& cargo build --release --locked -p greetd \
+	&& install -D /target/release/greetd /out/usr/bin/greetd
+ARG VERSION
+ARG RELEASE
+RUN opengva-rpm opengva-greetd GPL-3.0-or-later 'greetd, the login manager: the daemon only, as the PIN verifier' /out
+
+# GLib's TLS by OpenSSL, beside Rocky's by GnuTLS: the web viewer tells the
+# pages it shows which authorities there are by OpenSSL's SSL_CERT_FILE,
+# which GnuTLS does not read (app/viewers/web/viewer/src/main.rs). The version
+# is Rocky's.
+FROM build AS tls
+ADD --checksum=sha256:d8f4f1aab213179ae3351617b59dab5de6bcc9e785021eee178998ebd4bb3acf \
+	https://download.gnome.org/sources/glib-networking/2.80/glib-networking-2.80.0.tar.xz /src/
+RUN cd /src && tar xf glib-networking-2.80.0.tar.xz && cd glib-networking-2.80.0 \
+	&& meson setup build --prefix=/usr -Dgnutls=disabled -Dopenssl=enabled \
+		-Dlibproxy=disabled -Dgnome_proxy=disabled \
+	&& DESTDIR=/tmp/gn meson install -C build \
+	&& install -D /tmp/gn/usr/lib64/gio/modules/libgioopenssl.so /out/usr/lib64/gio/modules/libgioopenssl.so
+ARG VERSION
+ARG RELEASE
+RUN opengva-rpm opengva-glib-networking-openssl LGPL-2.1-or-later 'GLib TLS by OpenSSL, beside the GnuTLS one' /out
+
+# The HMI. Tauri builds the UI into the program, so the UI is built first;
+# "custom-protocol" is Tauri's switch for serving it, not a dev server.
+FROM build AS hmi
+COPY --exclude=viewers app /src/app
+RUN --mount=type=cache,target=/cargo/registry --mount=type=cache,target=/npm \
+	--mount=type=cache,target=/target \
+	cd /src/app && npm ci --no-audit --no-fund && npm run build \
+	&& cd src-tauri && cargo build --release --locked --features custom-protocol \
+	&& install -D /target/release/opengva-hmi /out/usr/bin/opengva-hmi
+# What the display shows while the crew station starts: the logo, on grey,
+# shown by cage until the HMI has drawn - in the middle of the display, at a
+# whole fraction of its size no wider than half the display. 960 is half of
+# a display 1920 wide, and its half is all but half of one 1024 wide.
+COPY assets/logo/opengva.svg /src/
+RUN mkdir -p /out/usr/share/opengva && rsvg-convert --keep-aspect-ratio --width 960 \
+	--background-color '#c8c9cc' --output /out/usr/share/opengva/splash.png /src/opengva.svg
+# With what runs it: its units, scripts, PAM and the rest (os/hmi/rootfs),
+# and the empty directories where areas, VNC views and web views are
+# described - there are none, unless a layer on it brings some.
+COPY os/hmi/rootfs/ /out/
+RUN mkdir -p /out/etc/opengva/gva-fa.d /out/etc/opengva/vnc.d /out/etc/opengva/web.d
+ARG VERSION
+ARG RELEASE
+RUN opengva-rpm opengva-hmi BSD-3-Clause 'The OpenGVA HMI, and the services that put it on the display' /out
+
+# The viewers: a VNC server's screen (noVNC, in a Tauri program as the HMI
+# is), and one web page, each in a window for the HMI to show in an area.
+FROM build AS viewers
+COPY app/viewers /src/viewers
+RUN --mount=type=cache,target=/cargo/registry --mount=type=cache,target=/npm \
+	--mount=type=cache,target=/target \
+	cd /src/viewers/vnc && npm ci --no-audit --no-fund && npm run build \
+	&& cd src-tauri && cargo build --release --locked --features custom-protocol \
+	&& install -D /target/release/opengva-vnc-viewer /out/vnc/usr/bin/opengva-vnc-viewer \
+	&& cd /src/viewers/web && cargo build --release --locked -p opengva-web-viewer \
+	&& install -D /target/release/opengva-web-viewer /out/web/usr/bin/opengva-web-viewer
+# noVNC is in the VNC viewer's page without the notices its files carry: they
+# go on the image in NOTICE. NOTICE names the noVNC it is about, and the
+# build stops if that is not the one npm fetched.
+RUN cd /src/viewers/vnc \
+	&& novnc=$(node -p "require('./node_modules/@novnc/novnc/package.json').version") \
+	&& { grep -q "^noVNC $novnc$" NOTICE || { echo "NOTICE is not about noVNC $novnc" >&2; exit 1; }; } \
+	&& install -D -m 0644 NOTICE /out/vnc/usr/share/licenses/opengva-vnc-viewer/NOTICE
+ARG VERSION
+ARG RELEASE
+RUN opengva-rpm opengva-vnc-viewer 'BSD-3-Clause AND MPL-2.0' 'A VNC server'"'"'s screen in a window, for the HMI to show' /out/vnc \
+	&& opengva-rpm opengva-web-viewer BSD-3-Clause 'One web page in a window, for the HMI to show' /out/web
+
+# --- The image.
+FROM $BASE
+# Graphics: virgl is the GPU of an accelerated VM; llvmpipe renders on the
+# CPU anywhere else; iris and the rest are there for real GPUs. GTK 3 and
+# WebKitGTK are what Tauri renders through. The HMI is set in a monospace
+# face. Nothing that is only recommended: a crew station has
+# no sound, portals or desktop.
+RUN dnf -y install epel-release \
+	&& dnf -y --setopt=install_weak_deps=False install \
+		mesa-dri-drivers mesa-libEGL mesa-libgbm libinput libseat libdisplay-info \
+		pixman libxkbcommon xkeyboard-config libpng \
+		gtk3 webkit2gtk4.1 glib-networking \
+		dejavu-sans-mono-fonts \
+	&& dnf clean all
+# The RPMs of the stages above, and what they require. Then the cache of
+# GLib's TLS modules has the OpenSSL one in it too.
+RUN --mount=type=bind,from=cage,source=/rpms,target=/rpms/cage \
+	--mount=type=bind,from=greetd,source=/rpms,target=/rpms/greetd \
+	--mount=type=bind,from=tls,source=/rpms,target=/rpms/tls \
+	--mount=type=bind,from=hmi,source=/rpms,target=/rpms/hmi \
+	--mount=type=bind,from=viewers,source=/rpms,target=/rpms/viewers \
+	dnf -y --setopt=install_weak_deps=False install /rpms/*/*.rpm \
+	&& dnf clean all \
+	&& gio-querymodules-64 /usr/lib64/gio/modules \
+	&& systemctl enable opengva-hmi.service opengva-verifier.service
