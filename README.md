@@ -18,31 +18,31 @@ HMI app, a form, a VNC screen, a web page.
   <tr>
     <td width="50%" valign="top">
       <img src="docs/screenshots/bezel-viewer.png" width="100%" alt="SYS page with alarm and threat messages, bezel buttons round the display"><br>
-      Status page in the bezel viewer (OpenGVA-Examples' <code>make run</code>), bezel buttons round the display.
+      Generic SYS Page
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/screenshots/alarms.png" width="100%" alt="Alarms table"><br>
-      Alarms table (F14): warning, caution, advisory.
+      Alarms table (F14)
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/screenshots/threats-table.png" width="100%" alt="Threats table"><br>
-      Threats table (F15): sensor state, bearings, ranges.
+      Threats table (F15).
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/screenshots/form-keyboard.png" width="100%" alt="A form with the on-screen keyboard"><br>
-      Input: standard keyboard input with GVA styling (<code>str-entry</code>).
+      Input: standard keyboard input with GVA styling 
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/screenshots/pin.png" width="100%" alt="PIN page"><br>
-      Input: numeric-only input with GVA styling (<code>access-demo</code>).
+      Input: numeric-only input with GVA styling 
     </td>
   </tr>
 </table>
