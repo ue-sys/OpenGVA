@@ -301,6 +301,7 @@ A new kind of page means editing `hmi-core` and `app/src`.
 | `app/crates/` | `hmi-core`, `hmi-feed`, `hmi-entry`, `hmi-access`, `bezel-input`, `us-keyboard` |
 | `app/src-tauri`, `app/src` | Tauri shell, SolidJS UI |
 | `app/viewers/` | `vnc`, `web`: windows the HMI can show |
+| `app/opengva.spec` | the spec of every RPM `opengva-rpm` makes |
 | `os/` | the image's layers: `base` (+ Cockpit on :9090, OpenGVA-branded), `hmi` (+ cage patches), `hardened` (last, on top of yours), and `rpm` (`opengva-rpm`, which every part is packed by) |
 | `sysml/` | the design in SysML v2, published to GitHub Pages by SysML Fabric |
 

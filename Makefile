@@ -37,7 +37,7 @@ RELEASE ?= $(shell git -C $(TOP) rev-list --count HEAD).g$(shell git -C $(TOP) r
 # Podman keeps what has not changed, so a build after a change to the HMI
 # compiles the HMI and no more.
 container:
-	$(PODMAN) build -t localhost/opengva:rpm --build-arg ROCKY=$(ROCKY) $(TOP)/os/rpm
+	$(PODMAN) build -t localhost/opengva:rpm --build-arg ROCKY=$(ROCKY) -f $(TOP)/os/rpm/Containerfile $(TOP)
 	$(PODMAN) build -t localhost/opengva:base --build-arg ROCKY=$(ROCKY) $(TOP)/os/base
 	$(PODMAN) build -t localhost/opengva:$(IMAGE) --build-arg BASE=localhost/opengva:base \
 		--build-arg RPM=localhost/opengva:rpm --build-arg VERSION=$(VERSION) --build-arg RELEASE=$(RELEASE) \

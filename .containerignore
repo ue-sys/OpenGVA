@@ -1,5 +1,5 @@
 # What podman is not to send when it builds an image from the top of the tree
-# (os/hmi/Containerfile): the builds, and what they make.
+# (os/rpm/Containerfile, os/hmi/Containerfile): the builds, and what they make.
 build/
 .git/
 **/node_modules/
@@ -7,4 +7,3 @@ build/
 **/dist/
 **/gen/
 **/__pycache__/
-def-stan-23-009/
