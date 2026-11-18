@@ -47,7 +47,7 @@ RUN usermod -p '!' root \
 # fapolicyd runs only what came from an RPM, as the RPM has it: trusted by
 # the RPM database alone, and only while the file's SHA-256 is still the
 # one the RPM gave it. Every part of OpenGVA, and of the layers on it, is
-# an RPM (os/rpm), and the build stops here if something that could run is
+# an RPM (opengva-rpm), and the build stops here if something that could run is
 # not: it would be refused on the crew station. Not counted: the boot
 # loader's files for the firmware (bootupd), and what the kernel itself
 # loads. What Rocky's bootc image has that no RPM does is its tool for

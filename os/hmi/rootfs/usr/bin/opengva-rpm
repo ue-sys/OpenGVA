@@ -2,20 +2,25 @@
 #
 # Make an RPM of a tree laid out as / is:
 #
-#   opengva-rpm NAME LICENSE SUMMARY DIR
+#   opengva-rpm NAME SUMMARY DIR
 #
 # into /rpms (RPMS= for elsewhere), at VERSION and RELEASE (0 and 1 unless
-# said). Every file in DIR is in it as it is there - its mode included -
-# with what is under /etc as configuration. It owns the empty directories,
+# said), under LICENSE (Unspecified unless said). Every file in DIR is in it
+# as it is there - its mode included - with what is under /etc as
+# configuration. It owns the empty directories,
 # and those whose names say opengva. What its programs need - libraries,
 # interpreters, the users of a sysusers.d - rpmbuild finds and it requires,
 # so that dnf installs those with it. The spec is app/opengva.spec (SPEC=
 # for another).
+#
+# It is on the crew station's image for the layers on it to pack theirs,
+# in a stage of their build; rpmbuild is not, and is fetched there.
 
 set -eu
-[ $# -eq 4 ] || { echo "usage: opengva-rpm NAME LICENSE SUMMARY DIR" >&2; exit 2; }
-name=$1 license=$2 summary=$3 root=$(realpath "$4")
+[ $# -eq 3 ] || { echo "usage: opengva-rpm NAME SUMMARY DIR" >&2; exit 2; }
+name=$1 summary=$2 root=$(realpath "$3")
 [ -n "$(ls -A "$root")" ] || { echo "opengva-rpm: $root is empty" >&2; exit 1; }
+command -v rpmbuild >/dev/null || dnf -y -q --setopt=install_weak_deps=False install rpm-build
 top=$(mktemp -d)
 trap 'rm -rf "$top"' EXIT
 
@@ -28,6 +33,6 @@ cd "$root"
 rpmbuild --quiet -bb --define "_topdir $top" --define 'source_date_epoch_from_changelog 0' --define "_rpmdir ${RPMS:-/rpms}" \
 	--define '_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm' \
 	--define "pkg_name $name" --define "pkg_version ${VERSION:-0}" --define "pkg_release ${RELEASE:-1}" \
-	--define "pkg_summary $summary" --define "pkg_license $license" \
+	--define "pkg_summary $summary" --define "pkg_license ${LICENSE:-Unspecified}" \
 	--define "pkg_root $root" --define "pkg_files $top/files" \
 	"${SPEC:-/usr/share/opengva/opengva.spec}"

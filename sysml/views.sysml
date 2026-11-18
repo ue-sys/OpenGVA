@@ -40,7 +40,6 @@ package OpenGVAViews {
         expose RpmPacker;
         expose BaseLayer;
         expose HmiLayer;
-        expose ServerLayer;
         expose HardenedLayer;
     }
 

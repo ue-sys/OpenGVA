@@ -201,7 +201,7 @@ package OpenGVAStructure {
     }
 
     part def RpmPacker {
-        doc /* os/rpm (localhost/opengva:rpm): Rocky and rpmbuild, and opengva-rpm, which makes an RPM of a tree laid out as / is. Every compiled part of OpenGVA and every layer on it is packed by it in a stage of its own build; it is not in the image. */
+        doc /* opengva-rpm (os/hmi, by app/opengva.spec), which makes an RPM of a tree laid out as / is. Every compiled part of OpenGVA and every layer on it is packed by it in a stage of its own build. It is on the image; rpmbuild, which it packs with, is not. */
     }
 
     part def BaseLayer :> ImageLayer {
@@ -210,10 +210,6 @@ package OpenGVAStructure {
 
     part def HmiLayer :> ImageLayer {
         doc /* os/hmi: the crew station's - cage, greetd, the HMI and its viewers. */
-    }
-
-    part def ServerLayer :> ImageLayer {
-        doc /* os/server: no screen, a network and its services (closed source). */
     }
 
     part def HardenedLayer :> ImageLayer {
@@ -259,14 +255,6 @@ package OpenGVAStructure {
         connect software.screen to display.input;
         connect touchScreen.touches to software.touch;
         connect bezel.buttons to software.bezel;
-    }
-
-    part def Server {
-        doc /* make container IMAGE=server: no screen, networked, its services ready rather than a first frame. */
-        port network : NetworkPort;
-        part base : BaseLayer;
-        part server : ServerLayer;
-        part cockpit : Cockpit;
     }
 
     part crewStation : CrewStation;

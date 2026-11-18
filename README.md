@@ -65,9 +65,9 @@ The image is the base: put what a crew station needs on it in a layer of
 your own.
 
 ```dockerfile
-FROM localhost/opengva:rpm AS rpm   # packs your files as an RPM
+FROM localhost/opengva:hmi AS rpm   # packs your files as an RPM
 COPY rootfs/ /src/                  # gva-fa.d, units, programs
-RUN opengva-rpm my-area BSD-3-Clause "My area" /src
+RUN opengva-rpm my-area "My area" /src
 
 FROM localhost/opengva:hmi          # or from a registry it has been pushed to
 RUN --mount=type=bind,from=rpm,source=/rpms,target=/rpms dnf -y install /rpms/*.rpm
@@ -134,16 +134,15 @@ unchanged since (`os/hardened`), and its build stops on anything runnable
 that isn't. OpenGVA's own parts are RPMs the same way (`rpm -qa 'opengva-*'`).
 
 Lay the files out under a directory as they are under `/`, and let
-`opengva-rpm` (in `localhost/opengva:rpm`, made by `make container`) pack
-them in a stage of your Containerfile:
+`opengva-rpm` (on the image, `localhost/opengva:hmi`) pack them in a stage
+of your Containerfile:
 
 ```dockerfile
 ARG BASE=localhost/opengva:hmi
-ARG RPM=localhost/opengva:rpm
 
-FROM $RPM AS rpm
+FROM $BASE AS rpm
 COPY rootfs/ /src/
-RUN opengva-rpm my-app BSD-3-Clause "My app's functional area" /src   # NAME LICENSE SUMMARY DIR
+RUN opengva-rpm my-app "My app's functional area" /src   # NAME SUMMARY DIR
 
 FROM $BASE
 RUN --mount=type=bind,from=rpm,source=/rpms,target=/rpms \
@@ -153,8 +152,10 @@ RUN systemctl enable NAME.service
 
 `opengva-rpm` keeps each file's mode, marks `/etc` as configuration, and
 lets rpmbuild work out what the files need (libraries, interpreters, the
-users in a `sysusers.d`), so `dnf` installs those too. `VERSION` and
-`RELEASE` in its environment set the RPM's (0 and 1 otherwise).
+users in a `sysusers.d`), so `dnf` installs those too. `VERSION`,
+`RELEASE` and `LICENSE` in its environment set the RPM's (0, 1 and
+`Unspecified` otherwise). rpmbuild is not on the image: `opengva-rpm` fetches
+it into that stage, which is thrown away.
 
 An RPM of your own, from your own spec, does as well: install it the same
 way, with its files at the paths above (`%{_sysconfdir}/opengva/gva-fa.d`,
@@ -302,7 +303,7 @@ A new kind of page means editing `hmi-core` and `app/src`.
 | `app/src-tauri`, `app/src` | Tauri shell, SolidJS UI |
 | `app/viewers/` | `vnc`, `web`: windows the HMI can show |
 | `app/opengva.spec` | the spec of every RPM `opengva-rpm` makes |
-| `os/` | the image's layers: `base` (+ Cockpit on :9090, OpenGVA-branded), `hmi` (+ cage patches), `hardened` (last, on top of yours), and `rpm` (`opengva-rpm`, which every part is packed by) |
+| `os/` | the image's layers: `base` (+ Cockpit on :9090, OpenGVA-branded), `hmi` (+ cage patches), and `hardened` (last, on top of yours). `opengva-rpm`, which every part is packed by, is in `hmi` |
 | `sysml/` | the design in SysML v2, published to GitHub Pages by SysML Fabric |
 
 ## Licence

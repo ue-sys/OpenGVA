@@ -3,21 +3,21 @@
 # source (app), the viewers' (app/viewers) and the logo (assets).
 #
 # Each part is compiled in a stage of its own and made an RPM there
-# (opengva-rpm, os/rpm), and the image installs the RPMs: what runs on a
+# (opengva-rpm, os/hmi/rootfs/usr/bin), and the image installs the RPMs: what runs on a
 # crew station is what an RPM put there, which is what os/hardened's
 # fapolicyd trusts. VERSION and RELEASE are the RPMs' (the Makefile).
 ARG BASE
-ARG RPM
+ARG ROCKY
 
 # --- What is compiled, in stages of their own, so that no compiler is in
 # the image. Each stage puts what it makes in /out, as it goes on the image,
-# and then makes an RPM of that in /rpms. On the Rocky the base is (os/rpm
-# is that and rpmbuild), and not on the base: what is compiled does not
+# and then makes an RPM of that in /rpms (opengva-rpm, by app/opengva.spec).
+# On the Rocky the base is, and not on the base: what is compiled does not
 # change when the base does.
-FROM $RPM AS build
+FROM $ROCKY AS build
 RUN dnf -y install epel-release \
 	&& dnf -y --enablerepo=crb --setopt=install_weak_deps=False install \
-		gcc meson ninja-build patch tar xz \
+		rpm-build gcc meson ninja-build patch tar xz \
 		wayland-devel wayland-protocols-devel libxkbcommon-devel libinput-devel \
 		libdrm-devel mesa-libgbm-devel mesa-libEGL-devel pixman-devel \
 		libseat-devel libdisplay-info-devel hwdata-devel systemd-devel libpng-devel \
@@ -29,6 +29,8 @@ RUN dnf -y install epel-release \
 # between builds (the RUN lines' cache mounts), and not under /root, which
 # is a link into /var on a bootc image.
 ENV CARGO_TARGET_DIR=/target CARGO_HOME=/cargo npm_config_cache=/npm
+COPY os/hmi/rootfs/usr/bin/opengva-rpm /usr/bin/opengva-rpm
+COPY app/opengva.spec /usr/share/opengva/opengva.spec
 
 # Cage, the compositor: cage 0.2.1 with our patches (os/hmi/cage), and the
 # wlroots it is made for built into it. Rocky has neither version.
@@ -52,7 +54,7 @@ RUN cd /src && tar xf cage.tar.gz && tar xf wlroots.tar.gz \
 # Declared here, after the compiling, so that a new release only packs again.
 ARG VERSION
 ARG RELEASE
-RUN opengva-rpm opengva-cage MIT 'Cage, the kiosk compositor, with OpenGVA patches and wlroots built in' /out
+RUN LICENSE=MIT opengva-rpm opengva-cage 'Cage, the kiosk compositor, with OpenGVA patches and wlroots built in' /out
 
 # greetd, the verifier (opengva-verifier.service). Only the daemon: the HMI
 # asks, not greetd's own login prompt.
@@ -65,7 +67,7 @@ RUN --mount=type=cache,target=/cargo/registry --mount=type=cache,target=/target 
 	&& install -D /target/release/greetd /out/usr/bin/greetd
 ARG VERSION
 ARG RELEASE
-RUN opengva-rpm opengva-greetd GPL-3.0-or-later 'greetd, the login manager: the daemon only, as the PIN verifier' /out
+RUN LICENSE=GPL-3.0-or-later opengva-rpm opengva-greetd 'greetd, the login manager: the daemon only, as the PIN verifier' /out
 
 # GLib's TLS by OpenSSL, beside Rocky's by GnuTLS: the web viewer tells the
 # pages it shows which authorities there are by OpenSSL's SSL_CERT_FILE,
@@ -81,12 +83,12 @@ RUN cd /src && tar xf glib-networking-2.80.0.tar.xz && cd glib-networking-2.80.0
 	&& install -D /tmp/gn/usr/lib64/gio/modules/libgioopenssl.so /out/usr/lib64/gio/modules/libgioopenssl.so
 ARG VERSION
 ARG RELEASE
-RUN opengva-rpm opengva-glib-networking-openssl LGPL-2.1-or-later 'GLib TLS by OpenSSL, beside the GnuTLS one' /out
+RUN LICENSE=LGPL-2.1-or-later opengva-rpm opengva-glib-networking-openssl 'GLib TLS by OpenSSL, beside the GnuTLS one' /out
 
 # The HMI. Tauri builds the UI into the program, so the UI is built first;
 # "custom-protocol" is Tauri's switch for serving it, not a dev server.
 FROM build AS hmi
-COPY --exclude=viewers app /src/app
+COPY --exclude=viewers --exclude=opengva.spec app /src/app
 RUN --mount=type=cache,target=/cargo/registry --mount=type=cache,target=/npm \
 	--mount=type=cache,target=/target \
 	cd /src/app && npm ci --no-audit --no-fund && npm run build \
@@ -101,12 +103,14 @@ RUN mkdir -p /out/usr/share/opengva && rsvg-convert --keep-aspect-ratio --width 
 	--background-color '#c8c9cc' --output /out/usr/share/opengva/splash.png /src/opengva.svg
 # With what runs it: its units, scripts, PAM and the rest (os/hmi/rootfs),
 # and the empty directories where areas, VNC views and web views are
-# described - there are none, unless a layer on it brings some.
+# described - there are none, unless a layer on it brings some. And with
+# opengva-rpm (in rootfs) and its spec, for the layers on it to pack theirs.
 COPY os/hmi/rootfs/ /out/
+COPY app/opengva.spec /out/usr/share/opengva/opengva.spec
 RUN mkdir -p /out/etc/opengva/gva-fa.d /out/etc/opengva/vnc.d /out/etc/opengva/web.d
 ARG VERSION
 ARG RELEASE
-RUN opengva-rpm opengva-hmi BSD-3-Clause 'The OpenGVA HMI, and the services that put it on the display' /out
+RUN LICENSE=BSD-3-Clause opengva-rpm opengva-hmi 'The OpenGVA HMI, and the services that put it on the display' /out
 
 # The viewers: a VNC server's screen (noVNC, in a Tauri program as the HMI
 # is), and one web page, each in a window for the HMI to show in an area.
@@ -128,8 +132,8 @@ RUN cd /src/viewers/vnc \
 	&& install -D -m 0644 NOTICE /out/vnc/usr/share/licenses/opengva-vnc-viewer/NOTICE
 ARG VERSION
 ARG RELEASE
-RUN opengva-rpm opengva-vnc-viewer 'BSD-3-Clause AND MPL-2.0' 'A VNC server'"'"'s screen in a window, for the HMI to show' /out/vnc \
-	&& opengva-rpm opengva-web-viewer BSD-3-Clause 'One web page in a window, for the HMI to show' /out/web
+RUN LICENSE='BSD-3-Clause AND MPL-2.0' opengva-rpm opengva-vnc-viewer 'A VNC server'"'"'s screen in a window, for the HMI to show' /out/vnc \
+	&& LICENSE=BSD-3-Clause opengva-rpm opengva-web-viewer 'One web page in a window, for the HMI to show' /out/web
 
 # --- The image.
 FROM $BASE
