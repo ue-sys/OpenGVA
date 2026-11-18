@@ -27,7 +27,7 @@ One `name value` per line, `#` comments:
 
 Other destinations are blocked and logged. Certificate checks are never off.
 
-Run it from a unit bound to the display: `ExecStart=/usr/libexec/opengva/on-display /usr/bin/opengva-web-viewer NAME`
+Run it from a unit bound to the display: `ExecStart=/usr/libexec/opengva/on-display /usr/bin/opengva-web-viewer NAME`.
 
 On load failure the window says why and retries (1, 2, 4, 8, then every 15 s). Logs `OPENGVA web NAME loaded uptime=N`.
 

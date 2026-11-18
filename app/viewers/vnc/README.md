@@ -19,7 +19,7 @@ One `name value` per line, `#` comments:
 | `server` | `host:port`, or `host` for 5900. IPv6 with port: `[brackets]` |
 | `window` | Window name; `gva-fa.d` uses it to give an area this view |
 | `view-only` | `yes`: look only. `no`/unset: touch is a mouse click |
-| `password` | File with the server password on line 1; `hmi` user must read it |
+| `password` | File with the server password on line 1; user `hmi` must be able to read it |
 | `scale` | `fit` (default) or `none` (1:1, centred) |
 
 Run it from a unit bound to the display: `ExecStart=/usr/libexec/opengva/on-display /usr/bin/opengva-vnc-viewer NAME`.
